@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from utils import read_mesh_type, read_solver_type, run_the_solver
+from repitframework.OpenFOAM.utils import read_mesh_type, read_solver_type, run_the_solver
 
 
 @dataclass
@@ -12,6 +12,7 @@ class BaseConfig:
     modelselector_dir:Path = Path(root_dir, "ModelSelector")
     openfoam_dir:Path = Path(root_dir, "OpenFOAM")
     assets_dir:Path = Path(root_dir, "Assets")
+    logger_level:str = "DEBUG"
 
 
 class OpenfoamConfig(BaseConfig):
@@ -24,4 +25,4 @@ class OpenfoamConfig(BaseConfig):
         self.data_vars: list = ["U", "p", "T"]
 
 if __name__ == "__main__":
-    print(OpenfoamConfig.solver_type, OpenfoamConfig().dataloader_dir)
+    print(OpenfoamConfig().solver_type, OpenfoamConfig().dataloader_dir,OpenfoamConfig().root_dir)

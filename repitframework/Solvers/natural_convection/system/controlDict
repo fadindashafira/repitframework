@@ -14,15 +14,15 @@ FoamFile
 }
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-application     buoyantFoam;
+application     buoyantBoussinesqSimpleFoam;
 
 startFrom       latestTime;
 
-startTime       18;
+startTime       18.0;
 
 stopAt          endTime;
 
-endTime         20;
+endTime         20.0;
 
 deltaT          1;
 

@@ -84,7 +84,7 @@ def numpy_to_OpenFOAM(solver_dir:Path = None,
     '''
     assets_path = manage_assets(solver_dir=solver_dir, assets_dir=assets_dir)
     numpy_files = [i for i in assets_path.iterdir() if i.suffix == ".npy"]
-    latest_time = max([int(re.search(r"(\d+)", file.name).group(1)) for file in numpy_files])
+    latest_time = max([float(re.search(r"(\d+)", file.name).group(1)) for file in numpy_files])
     print("test")
     # List files in the assets directory:
     
@@ -131,7 +131,7 @@ def run_the_solver(solver_dir:Path = None,
 
     # Run the solver
     try:
-        print("Running the CFD solver!")
+        logger.info("Running the CFD solver!")
         command = [solver_, "-case", solver_dir]
         solver_result = subprocess.run(command, capture_output=True, text=True)
         logger.debug(f"\n Solver Output: {solver_result.stdout}\n")

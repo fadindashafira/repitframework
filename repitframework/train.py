@@ -1,4 +1,4 @@
-from config import BaseConfig
+from repitframework.config import BaseConfig
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import unittest
-import OpenFOAM
-import config as cfg
+import repitframework.OpenFOAM as OpenFOAM
+import repitframework.config as cfg
 from pathlib import Path
 import subprocess
 import re

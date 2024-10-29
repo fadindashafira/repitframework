@@ -1,4 +1,5 @@
 # Ignore Assets and logs dirctories
-Assets/
-logs/
+repitframework/Assets/
+repitframework/logs/
 *.pyc
+notes.txt

@@ -1,5 +1,5 @@
-from OpenFOAM.utils import run_the_solver, update_time_foamDictionary
-from config import OpenfoamConfig
+from repitframework.OpenFOAM.utils import run_the_solver, update_time_foamDictionary
+from repitframework.config import OpenfoamConfig
 
 if __name__ == "__main__":
     openfoam_config = OpenfoamConfig()
