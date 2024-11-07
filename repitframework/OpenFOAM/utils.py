@@ -80,66 +80,6 @@ def parse_to_numpy(solver_dir:Path = None,
 
     return None
 
-def write_scalar_smap(filename, field_name, units, data):
-    """
-    Writes a scalar field to a .smap file.
-    """
-    with open(filename, 'w') as f:
-        f.write(f"# STAR-CD Scalar Field File\n")
-        f.write(f"FIELD_NAME: {field_name}\n")
-        f.write(f"UNITS: {units}\n")
-        f.write(f"NUM_POINTS: {len(data)}\n\n")
-        f.write("NODE_ID VALUE\n")
-        
-        for node_id, value in enumerate(data, start=1):
-            f.write(f"{node_id} {value}\n")
-
-
-def write_vector_smap(filename, field_name, units, data):
-    """
-    Writes a vector field to a .smap file.
-    """
-    with open(filename, 'w') as f:
-        f.write(f"# STAR-CD Vector Field File\n")
-        f.write(f"FIELD_NAME: {field_name}\n")
-        f.write(f"UNITS: {units}\n")
-        f.write(f"NUM_POINTS: {len(data)}\n\n")
-        f.write("NODE_ID VX VY VZ\n")
-        
-        for node_id, vector in enumerate(data, start=1):
-            f.write(f"{node_id} {vector[0]} {vector[1]} {vector[2]}\n")
-
-
-def write_tensor_smap(filename, field_name, units, data):
-    """
-    Writes a tensor field to a .smap file.
-    """
-    with open(filename, 'w') as f:
-        f.write(f"# STAR-CD Tensor Field File\n")
-        f.write(f"FIELD_NAME: {field_name}\n")
-        f.write(f"UNITS: {units}\n")
-        f.write(f"NUM_POINTS: {len(data)}\n\n")
-        f.write("NODE_ID XX XY XZ YX YY YZ ZX ZY ZZ\n")
-        
-        for node_id, tensor in enumerate(data, start=1):
-            f.write(f"{node_id} " + " ".join(map(str, tensor.flatten())) + "\n")
-
-
-def numpy_to_OpenFOAM(solver_dir:Path = None, 
-                      assets_dir:Path = ROOT_DIR/"Assets", 
-                      variables:list = ["U", "p", "T"]) -> None:
-    '''
-    After successful training, we need to re-run the OpenFOAM solver as the residuals increases.
-    So, to run the simulation from any intermediate time step, OpenFOAM requires the data from previous
-    time step. This function converts the numpy arrays to OpenFOAM foamDictionary files.  
-    '''
-    assets_path = manage_assets(solver_dir=solver_dir, assets_dir=assets_dir)
-    numpy_files = [i for i in assets_path.iterdir() if i.suffix == ".npy"]
-    latest_time = max([float(re.search(r"(\d+)", file.name).group(1)) for file in numpy_files])
-    print("test")
-    # List files in the assets directory:
-    
-
 # TODO: Don't forget to write test cases for every functions inside OpenFOAM module.
 def run_solver(solver_dir:Path = None, 
                    assets_dir:Path = ROOT_DIR/"Assets", 

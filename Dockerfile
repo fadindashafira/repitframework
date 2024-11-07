@@ -1,36 +1,37 @@
-# Use the official OpenFOAM 10 image as the base image
-FROM openfoam/openfoam11-paraview510
+FROM pytorch/pytorch:2.5.1-cuda12.1-cudnn9-devel
 
-#Set the working directory to the OpenFOAM case directory
-WORKDIR /home/openfoam 
-
-USER 0
-
-RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-dev python3-setuptools &&\
-    apt-get -y install git htop build-essential software-properties-common && \
-    pip3 install pandas numpy matplotlib openturns platypus-opt torch torchvision
-
-#Set the user to the OpenFOAM user:
-RUN useradd --user-group --create-home --shell /bin/bash openfoam ;\
+# Create a new user openfoam
+RUN useradd -ms /bin/bash openfoam && \
+    usermod -aG sudo openfoam && \
     echo "openfoam ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
 
-#Source the user to the OpenFOAM user:
-RUN echo ". /opt/openfoam11/etc/bashrc" >> /home/openfoam/.bashrc
+# Set environment variables for non-interactive installations and timezone
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=Asia/Seoul
 
-#Make the run directory: 
-RUN export FOAM_RUN=/home/openfoam/run && mkdir -p $FOAM_RUN 
+# Install OpenFOAM
+RUN apt-get update && apt-get install -y software-properties-common wget sudo vim && \
+    wget -O - https://dl.openfoam.org/gpg.key > /etc/apt/trusted.gpg.d/openfoam.asc &&\
+    add-apt-repository http://dl.openfoam.org/ubuntu &&\
+    apt-get update &&\
+    apt-get install -y openfoam12 &&\
+    echo "source /opt/openfoam12/etc/bashrc" >> /home/openfoam/.bashrc &&\
+    chown -R openfoam:openfoam /opt/openfoam12 /home/openfoam
 
-#Specify the volume:
-VOLUME [ "/home/openfoam/repitframework" ]
+# Install Python packages
+RUN conda install -y -c conda-forge numpy matplotlib pandas &&\
+    pip install Ofpp
 
-# Expose the port for ParaView/ParaFOAM:
-EXPOSE 8080
 
-# Set the DISPLAY environment variable:
+# Set environment variables
+ENV PATH=/opt/openfoam12/bin:$PATH
+ENV FOAM_RUN=/home/openfoam/run
+ENV FOAM_INST=/opt/openfoam12
+
+# Set the DISPLAY environment variable for GUI support
 ENV DISPLAY=:0
 
-#Run the OpenFOAM solver for your case: 
-CMD ["/bin/bash"]
+# Specify the volume for host mounting:
+VOLUME /home/openfoam/host_mount
 
-# It is mandatory to install nvidia-container-toolkit in the host machine, to run the container with GPU support. 
-# Please refer to this documentation to install it: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html#docker
+CMD ["/bin/bash"]
