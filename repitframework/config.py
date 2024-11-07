@@ -1,7 +1,5 @@
 from dataclasses import dataclass
 from pathlib import Path
-from repitframework.OpenFOAM.utils import read_solver_type
-
 
 @dataclass
 class BaseConfig:
@@ -21,7 +19,7 @@ class OpenfoamConfig(BaseConfig):
         self.solver_dir:str = Path(self.root_dir, "Solvers","natural_convection")
         self.case_name:str = None if self.solver_dir is None else self.solver_dir.name
         self.mesh_type:str = "blockMesh"
-        self.solver_type:str = read_solver_type(solver_dir=self.solver_dir)
+        self.solver_type:str = "buoyantFoam"
         self.data_vars: list = ["U", "p", "T"]
 
 if __name__ == "__main__":

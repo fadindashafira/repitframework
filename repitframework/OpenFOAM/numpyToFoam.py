@@ -2,6 +2,7 @@ import numpy as np
 from pathlib import Path
 import subprocess
 import re
+from repitframework import config
 
 def parse_numpy(data: np.ndarray) -> str:
     """
@@ -72,5 +73,21 @@ def numpyToFoam(file_path:Path,
 
     
 if __name__ == "__main__":
-    path = Path("/home/ninelab/repitframework/repitframework/Assets/natural_convection/T_3.npy")
-    numpyToFoam(path, "T",20, Path("/home/ninelab/repitframework/repitframework/Solvers/natural_convection"))
+    from utils import run_solver, update_time_foamDictionary
+
+    current_time:int = 2
+    time_step:int = 1
+    next_time:int = current_time + time_step
+
+    openfoam_config = config.OpenfoamConfig()
+    solver_dir:Path = openfoam_config.solver_dir
+
+    for var in openfoam_config.data_vars:
+        numpy_file_path = openfoam_config.assets_dir / openfoam_config.case_name / f"{var}_{next_time}.npy"
+        numpyToFoam(numpy_file_path, var, current_time, solver_dir)
+
+    check_time_update:bool = update_time_foamDictionary(solver_dir=solver_dir,
+                                                    present_time=next_time,
+                                                    end_time=next_time + 2*time_step)
+    if check_time_update:
+        run_solver()

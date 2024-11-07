@@ -81,9 +81,9 @@ def parse_to_numpy(solver_dir:Path = None,
     return None
 
 # TODO: Don't forget to write test cases for every functions inside OpenFOAM module.
-def run_solver(solver_dir:Path = None, 
-                   assets_dir:Path = ROOT_DIR/"Assets", 
-                   mesh_type:str = "blockMesh") -> None:
+def run_solver(solver_dir:Path = ROOT_DIR/"Solvers"/"natural_convection", 
+                   assets_dir:Path = ROOT_DIR/"Assets"/"natural_convection", 
+                   mesh_type:str = "blockMesh") -> bool:
     '''
     This function aims at running the CFD solver of your interest. 
     For example:
@@ -124,6 +124,7 @@ def run_solver(solver_dir:Path = None,
         logger.debug(f"\n Mesh Output: {mesh_result.stdout}\n")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error in creating the mesh: {e}")
+        return False
 
     # Run the solver
     try:
@@ -133,11 +134,12 @@ def run_solver(solver_dir:Path = None,
         logger.debug(f"\n Solver Output: {solver_result.stdout}\n")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error in running the solver: {e}")
+        return False
 
     # Save the data in the assets directory:
     assets_path = manage_assets(solver_dir=solver_dir,assets_dir=assets_dir)
     parse_to_numpy(solver_dir=solver_dir, assets_dir=assets_path)
-    return None
+    return True
 
 def read_mesh_type(solver_dir:Path = None, mesh_type:str = None) -> str:
     '''
@@ -184,9 +186,9 @@ def read_solver_type(solver_dir:Path = None) -> str:
     except subprocess.CalledProcessError as e:
         logger.error(f"Error in reading the solver type: {e}")
     
-    return solver_type
+    return solver_type.strip()
 
-def update_time_foamDictionary(solver_dir:Path, present_time, end_time) -> None:
+def update_time_foamDictionary(solver_dir:Path, present_time, end_time) -> bool:
     '''
     This function updates the time in the controlDict file. This is useful when you want to 
     run the solver for a specific time. 
@@ -202,6 +204,7 @@ def update_time_foamDictionary(solver_dir:Path, present_time, end_time) -> None:
     '''
     controlDict_path = Path.joinpath(solver_dir, "system", "controlDict")
     if not controlDict_path.exists():
+        return False
         raise FileNotFoundError(f"controlDict file not found in the directory: {solver_dir}")
     
     command_list = ["foamDictionary", controlDict_path, "-set", 
@@ -210,9 +213,10 @@ def update_time_foamDictionary(solver_dir:Path, present_time, end_time) -> None:
         command_result = subprocess.run(command_list, capture_output=True, text=True)
         logger.debug(f"Time updated successfully: {command_result.stdout}")
     except subprocess.CalledProcessError as e:
+        return False
         logger.error(f"Error in updating the time: {e}")
 
-    return None
+    return True
 
 if __name__ == "__main__":
     solver_dir = ROOT_DIR/"Solvers"/"natural_convection"
@@ -220,5 +224,4 @@ if __name__ == "__main__":
 
     # run_the_solver(solver_dir=solver_dir)
     # update_time_foamDictionary(solver_dir=solver_dir, present_time=2, end_time=3)
-    numpy_to_OpenFOAM(solver_dir=solver_dir, assets_dir=assets_dir)
     # logger.info("Solver ran successfully!")
