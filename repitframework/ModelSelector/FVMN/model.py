@@ -1,16 +1,19 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from repitframework import config
 
 class FVMN(nn.Module):
-    def __init__(self, net_a, net_p, net_ph, net_u, net_v, Rs, x_val, y_val, x_pinn, y_pinn):
+    def __init__(self, residual, x_val, y_val, x_pinn, y_pinn, hidden_layers:int=11, hidden_size:int=512):
         super(FVMN, self).__init__()
-        self.net_a = net_a
-        self.net_p = net_p
-        self.net_ph = net_ph
-        self.net_u = net_u
-        self.net_v = net_v
-        self.Rs = Rs
+
+        self.net_a = self.network_architecture()
+        self.net_u = self.network_architecture()
+        self.net_v = self.network_architecture()
+
+        self.hidden_layers = hidden_layers
+        self.hidden_size = hidden_size
+        self.Rs = residual
         self.x_val = x_val
         self.y_val = y_val
         self.x_pinn = x_pinn
@@ -21,8 +24,10 @@ class FVMN(nn.Module):
         self.loss_tot_tracker = []
 
     def forward(self, x):
-        # The forward method isn't used directly since we're handling multiple networks separately
-        pass
+        y_pred_a = self.net_a(x)
+        y_pred_u = self.net_u(x)
+        y_pred_v = self.net_v(x)
+        return y_pred_a, y_pred_u, y_pred_v
 
     def train_step(self, data, optimizer):
         x_pre, y = data
@@ -90,6 +95,13 @@ class FVMN(nn.Module):
         self.loss_tot_tracker.append(loss_tot.item())
 
         return {'val_loss': val_loss.item(), 'loss_tot': loss_tot.item()}
-
+    
+    def network_architecture(self, input_shape:int=15, output_shape:int=1):
+        hidden_size = self.hidden_size
+        layers = [nn.Linear(input_shape, hidden_size), nn.ReLU()]
+        layers += [nn.Linear(hidden_size, hidden_size), nn.ReLU()] * (self.hidden_layers -1)
+        layers += [nn.Linear(hidden_size, output_shape)]
+        return nn.Sequential(*layers)
+        
     def get_metrics(self):
         return {'val_loss': self.val_loss_tracker, 'loss_tot': self.loss_tot_tracker}

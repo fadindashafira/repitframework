@@ -1,8 +1,6 @@
 import Ofpp
 from pathlib import Path
-import os
 import subprocess
-import re
 import logging
 import numpy as np
 
@@ -31,7 +29,7 @@ def manage_assets(solver_dir:Path = None, assets_dir:Path = None) -> Path:
 def parse_to_numpy(solver_dir:Path = None, 
                    assets_dir:Path = None, 
                    variables:list = ["U", "p", "T"],
-                   del_dirs:bool = False) -> None:
+                   del_dirs:bool = False) -> bool:
     '''
     OpenFOAM stores the data in the form of Dictionary(OpenFOAM type) files. But to train the model
     it will be easier to change to tensors if we can convert them to numpy arrays. This function
@@ -64,26 +62,27 @@ def parse_to_numpy(solver_dir:Path = None,
             try:
                 data = Ofpp.parse_internal_field(Path(time_dir, var))
                 logger.debug(f"Data parsed to numpy:{var}_{time_dir.name} --> {data.shape}")
-                np.save(Path(assets_dir, f"{var}_{time_dir.name}.npz"), data)
+                np.save(Path(assets_dir, f"{var}_{time_dir.name}.npy"), data)
             except Exception as e:
                 logger.error(f"Error in parsing the data to numpy: {e}")
+                return False
     
     try: 
-        logger.debug("Deleting the time directories!")
         # TODO: check if we need to keep last time directory or not: time_list[:-1]
         command_deldirs = ["foamListTimes", "-case", solver_dir, 
-                           "-rm", "-time",",".join(time_list)]
+                           "-rm", "-time",",".join(time_list[:-1])]
         subprocess.run(command_deldirs,capture_output=True, text=True) if del_dirs else None
         logger.debug("Time directories deleted successfully!") if del_dirs else logger.debug("Skipped deleting time directories!")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error in deleting the time directories: {e}")
+        return False
 
-    return None
+    return True
 
 # TODO: Don't forget to write test cases for every functions inside OpenFOAM module.
 def run_solver(solver_dir:Path = ROOT_DIR/"Solvers"/"natural_convection", 
-                   assets_dir:Path = ROOT_DIR/"Assets"/"natural_convection", 
-                   mesh_type:str = "blockMesh") -> bool:
+                   assets_dir:Path = ROOT_DIR/"Assets", 
+                   mesh_type:str = "blockMesh") -> Path:
     '''
     This function aims at running the CFD solver of your interest. 
     For example:
@@ -102,7 +101,7 @@ def run_solver(solver_dir:Path = ROOT_DIR/"Solvers"/"natural_convection",
     assets_dir: str: The path to the assets directory. 
 
     Returns:
-    None
+    assets_path: Path: The path to the assets directory where the data needs to be saved. 
 
     Functionality: 
     Saves the data in the Assets directory. 
@@ -113,15 +112,19 @@ def run_solver(solver_dir:Path = ROOT_DIR/"Solvers"/"natural_convection",
     2. Run the solver:
     buoyantFoam -case solver_dir
     '''
+    solver_dir = Path(solver_dir) if isinstance(solver_dir, str) else solver_dir 
+    assets_dir = Path(assets_dir) if isinstance(assets_dir, str) else assets_dir
+
     mesh_ = read_mesh_type(solver_dir=solver_dir, mesh_type=mesh_type)
     solver_ = read_solver_type(solver_dir=solver_dir)
-
     # Create the mesh
     try:
         logger.debug("Creating the mesh!")
         command = [mesh_, "-case", solver_dir]
         mesh_result = subprocess.run(command, capture_output=True, text=True)
-        logger.debug(f"\n Mesh Output: {mesh_result.stdout}\n")
+        logger.debug(f"\n Mesh Output: {mesh_result.stdout}\n :-> Mesh return code: {mesh_result.returncode}")
+        if mesh_result.returncode != 0:
+            raise Exception(f"Exception occurred; while creating the mesh. \n{mesh_result.stderr}")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error in creating the mesh: {e}")
         return False
@@ -131,15 +134,17 @@ def run_solver(solver_dir:Path = ROOT_DIR/"Solvers"/"natural_convection",
         logger.info("Running the CFD solver!")
         command = [solver_, "-case", solver_dir]
         solver_result = subprocess.run(command, capture_output=True, text=True)
-        logger.debug(f"\n Solver Output: {solver_result.stdout}\n")
+        logger.debug(f"\n Solver Output: {solver_result.stdout}\n:-> Solver return code: {solver_result.returncode}")
+        if solver_result.returncode != 0:
+            raise Exception(f"Exception occurred; while running the solver. \n {solver_result.stderr}")
     except subprocess.CalledProcessError as e:
         logger.error(f"Error in running the solver: {e}")
         return False
 
     # Save the data in the assets directory:
     assets_path = manage_assets(solver_dir=solver_dir,assets_dir=assets_dir)
-    parse_to_numpy(solver_dir=solver_dir, assets_dir=assets_path)
-    return True
+    # parse_to_numpy(solver_dir=solver_dir, assets_dir=assets_path)
+    return assets_path
 
 def read_mesh_type(solver_dir:Path = None, mesh_type:str = None) -> str:
     '''
@@ -172,15 +177,10 @@ def read_solver_type(solver_dir:Path = None) -> str:
 
     OpenFOAM command used:
     1. Get application type, like buoyantFoam, simpleFoam, etc.
-    foamDictionary system/controlDict -entry application -value
+    foamDictionary -case $(CASE_DIRECTORY) -entry application -value system/controlDict
     '''
-
-    control_dict_path = Path.joinpath(solver_dir, "system", "controlDict")
-    if not control_dict_path.exists():
-        raise FileNotFoundError(f"controlDict file not found in the directory: {solver_dir}")
-    
     try:
-        command = ["foamDictionary",control_dict_path, "-entry", "application", "-value"]
+        command = ["foamDictionary","-case",solver_dir, "-entry", "application", "-value", "system/controlDict"]
         command_result = subprocess.run(command, capture_output=True, text=True)
         solver_type = command_result.stdout
     except subprocess.CalledProcessError as e:
@@ -188,7 +188,7 @@ def read_solver_type(solver_dir:Path = None) -> str:
     
     return solver_type.strip()
 
-def update_time_foamDictionary(solver_dir:Path, present_time, end_time) -> bool:
+def update_time_foamDictionary(solver_dir:Path, present_time, end_time, time_step=0.01) -> bool:
     '''
     This function updates the time in the controlDict file. This is useful when you want to 
     run the solver for a specific time. 
@@ -200,28 +200,21 @@ def update_time_foamDictionary(solver_dir:Path, present_time, end_time) -> bool:
 
     OpenFOAM command used:
     1. Update the time in the controlDict file:
-    foamDictionary system/controlDict -set startTime=0,endTime=10
+    foamDictionary -case $(CASE_DIRECTORY) -set startTime=0,endTime=10,writeInterval=0.01 system/controlDict
     '''
-    controlDict_path = Path.joinpath(solver_dir, "system", "controlDict")
-    if not controlDict_path.exists():
-        return False
-        raise FileNotFoundError(f"controlDict file not found in the directory: {solver_dir}")
-    
-    command_list = ["foamDictionary", controlDict_path, "-set", 
-                    f"startTime={present_time},endTime={end_time}"]
+    command_list = ["foamDictionary", "-case",solver_dir, "-set", 
+                    f"startTime={present_time},endTime={end_time},writeInterval={time_step}","system/controlDict"]
     try:
         command_result = subprocess.run(command_list, capture_output=True, text=True)
         logger.debug(f"Time updated successfully: {command_result.stdout}")
     except subprocess.CalledProcessError as e:
-        return False
         logger.error(f"Error in updating the time: {e}")
-
+        return False
     return True
 
 if __name__ == "__main__":
     solver_dir = ROOT_DIR/"Solvers"/"natural_convection"
     assets_dir = ROOT_DIR/"Assets"
-
     # run_the_solver(solver_dir=solver_dir)
     # update_time_foamDictionary(solver_dir=solver_dir, present_time=2, end_time=3)
     # logger.info("Solver ran successfully!")
