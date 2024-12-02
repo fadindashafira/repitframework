@@ -1,6 +1,7 @@
 # Ignore Assets and logs dirctories
 repitframework/Assets/
 repitframework/logs/
+repitframework/ModelDump/
 *.pyc
 .vscode/
 **/__pycache__

@@ -1,220 +1,263 @@
 import Ofpp
 from pathlib import Path
 import subprocess
-import logging
 import numpy as np
+from repitframework.config import OpenfoamConfig
+from tqdm import tqdm
 
-__all__ = [ "parse_to_numpy", "run_solver", "read_mesh_type", 
-           "read_solver_type", "update_time_foamDictionary","manage_assets"]
-ROOT_DIR = Path(__file__).parent.parent.resolve()
+class OpenfoamUtils:
+    def __init__(self, openfoam_config:OpenfoamConfig, 
+                 solver_dir:Path=None, assets_dir:Path=None):
 
-# Setting the logger
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-formatter = logging.Formatter('%(asctime)s:%(name)s:%(message)s')
-file_handler = logging.FileHandler(ROOT_DIR / "logs" / "OpenFOAM.log")
-file_handler.setFormatter(formatter)
-logger.addHandler(file_handler)
-
-def manage_assets(solver_dir:Path = None, assets_dir:Path = None) -> Path:
-    '''
-    If we are trying out with different cases, this function is to put them nicely inside 
-    the assets directory with the name of the case as classifiers.  
-    '''    
-    case_name = solver_dir.name
-    assets_dir = Path.joinpath(assets_dir, case_name)
-    assets_dir.mkdir(parents=True, exist_ok=True)
-    return assets_dir
-
-def parse_to_numpy(solver_dir:Path = None, 
-                   assets_dir:Path = None, 
-                   variables:list = ["U", "p", "T"],
-                   del_dirs:bool = False) -> bool:
-    '''
-    OpenFOAM stores the data in the form of Dictionary(OpenFOAM type) files. But to train the model
-    it will be easier to change to tensors if we can convert them to numpy arrays. This function
-    does the same. To carry out this task, we can use the Ofpp library.
-
-    Args:
-    solver_dir: str: The path to the solver directory where OpenFOAM has stored the data after 
-                    running the solver.
-    assets_dir: str: The path to the assets directory where we want to save the data in the numpy
-                     format. 
-
-    OpenFOAM command used: 
-    1. List the time directories:
-    foamListTimes -case solver_dir
-    2. Deleting the time directories:
-    foamListTimes -case solver_dir -rm -time " f,2,3,4,5"
-    '''
-    # List the time directories
-    logger.debug("Listing the time directories!")
-    command_list_dir = ["foamListTimes", "-case", solver_dir]
-    time_list = subprocess.run(command_list_dir, 
-                                capture_output=True, 
-                                text=True).stdout.split("\n")
-    time_list = [i for i in time_list if i]
-    time_directories = [Path(solver_dir,i) for i in time_list]
+        self.openfoam_config = openfoam_config
+        self.solver_dir = solver_dir if solver_dir else self.openfoam_config.solver_dir
+        self.assets_dir = assets_dir if assets_dir else self.openfoam_config.assets_dir
+        self.assets_path = self._get_assets_path()
+        self.mesh_type = self._get_mesh_type()
+        self.solver_type = self._read_solver_type()
     
-    # Parse the data to numpy
-    for time_dir in time_directories:
-        for var in variables:
-            try:
-                data = Ofpp.parse_internal_field(Path(time_dir, var))
-                logger.debug(f"Data parsed to numpy:{var}_{time_dir.name} --> {data.shape}")
-                np.save(Path(assets_dir, f"{var}_{float(time_dir.name)}.npy"), data) # We are saving it in float because we want to keep things consistent.
-            except Exception as e:
-                logger.error(f"Error in parsing the data to numpy: {e}")
-                return False
+    def _get_assets_path(self) -> Path:
+        '''
+        If we are trying out with different cases, this method is to put them nicely inside 
+        the assets directory with the name of the case as classifiers.  
+        '''  
+        case_name = self.solver_dir.name
+        assets_path = Path.joinpath(self.assets_dir, case_name)
+        assets_path.mkdir(parents=True, exist_ok=True)
+        return assets_path
     
-    try: 
-        # TODO: check if we need to keep last time directory or not: time_list[:-1]
-        command_deldirs = ["foamListTimes", "-case", solver_dir, 
-                           "-rm", "-time",",".join(time_list[:-1])]
-        subprocess.run(command_deldirs,capture_output=True, text=True) if del_dirs else None
-        logger.debug("Time directories deleted successfully!") if del_dirs else logger.debug("Skipped deleting time directories!")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error in deleting the time directories: {e}")
-        return False
+    def _get_mesh_type(self) -> str:
+        '''
+        We are getting the mesh type analyzing the solvers directory. For example: 
+        if we have "blockMeshDict" file in the "system" directory inside the solver case directory,
+        then we can say that the mesh type is "blockMesh". 
 
-    return True
+        For now we could handle only two types of mesh: blockMesh and snappyHexMesh.
 
-# TODO: Don't forget to write test cases for every functions inside OpenFOAM module.
-def run_solver(solver_dir:Path = ROOT_DIR/"Solvers"/"natural_convection", 
-                   assets_dir:Path = ROOT_DIR/"Assets", 
-                   mesh_type:str = "blockMesh") -> Path:
-    '''
-    This function aims at running the CFD solver of your interest. 
-    For example:
-    In OpenFOAM, what you normally do is, clone the existing solver similar to the case you want to
-    solve, modify different parameters according to your requirements and then run the solver.
-    To run the solver you need to do these things: 
-    - Go to the solver directory
-    - Create the mesh
-    - Run the solver
-
-    So, this function tries lift off these steps from your shoulder.
-
-    Args:
-    solver_path: str: The path to the solver directory. If not provided, it will ask you to
-                    provide the path.
-    assets_dir: str: The path to the assets directory. 
-
-    Returns:
-    assets_path: Path: The path to the assets directory where the data needs to be saved. 
-
-    Functionality: 
-    Saves the data in the Assets directory. 
-
-    OpenFOAM commands used:
-    1. Create the mesh:
-    blockMesh -case solver_dir
-    2. Run the solver:
-    buoyantFoam -case solver_dir
-    '''
-    solver_dir = Path(solver_dir) if isinstance(solver_dir, str) else solver_dir 
-    assets_dir = Path(assets_dir) if isinstance(assets_dir, str) else assets_dir
-
-    mesh_ = read_mesh_type(solver_dir=solver_dir, mesh_type=mesh_type)
-    solver_ = read_solver_type(solver_dir=solver_dir)
-    # Create the mesh
-    try:
-        logger.debug("Creating the mesh!")
-        command = [mesh_, "-case", solver_dir]
-        mesh_result = subprocess.run(command, capture_output=True, text=True)
-        logger.debug(f"\n Mesh Output: {mesh_result.stdout}\n :-> Mesh return code: {mesh_result.returncode}")
-        if mesh_result.returncode != 0:
-            raise Exception(f"Exception occurred; while creating the mesh. \n{mesh_result.stderr}")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error in creating the mesh: {e}")
-        return False
-
-    # Run the solver
-    try:
-        logger.info("Running the CFD solver!")
-        command = [solver_, "-case", solver_dir]
-        solver_result = subprocess.run(command, capture_output=True, text=True)
-        logger.debug(f"\n Solver Output: {solver_result.stdout}\n:-> Solver return code: {solver_result.returncode}")
-        if solver_result.returncode != 0:
-            raise Exception(f"Exception occurred; while running the solver. \n {solver_result.stderr}")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error in running the solver: {e}")
-        return False
-
-    # Save the data in the assets directory:
-    assets_path = manage_assets(solver_dir=solver_dir,assets_dir=assets_dir)
-    # parse_to_numpy(solver_dir=solver_dir, assets_dir=assets_path)
-    return assets_path
-
-def read_mesh_type(solver_dir:Path = None, mesh_type:str = None) -> str:
-    '''
-    Ensures the meshing technique used to generate the mesh. It seems there is no direct way to get
-    the mesh type.So, we can ask the user to provide the mesh type.
-
-    - Example: blockMesh, snappyHexMesh, etc.
-    - mesh_type information is also saved in the OpenfoamConfig class for future reference. It might
-    seem little non-pythonic but it feels like a right thing to do. #TODO: Change in future if you
-    find a better way to do this, refer to solver_type also.  
-    '''
-    if mesh_type is None:
-        mesh_type = input("Please enter the mesh type: e.g. blockMesh, snappyHexMesh, etc.\n")
-    return mesh_type
-
-def read_solver_type(solver_dir:Path = None) -> str:
-    '''
-    Ensures the solver type used to solve the problem. foamDictionary command comes in very handy
-    to get the solver type.
-
-    - Example: foamDictionary system/controlDict -entry application gives the application information 
-    of the case. Applying regular expression to the received output, we can get the solver type.
-    - solver_type information is also saved in the OpenfoamConfig class for future reference.
-
-    Args:
-    solver_dir: str: The path to the solver directory.
-
-    Returns:
-    solver_type: str: The solver type used to solve the problem.
-
-    OpenFOAM command used:
-    1. Get application type, like buoyantFoam, simpleFoam, etc.
-    foamDictionary -case $(CASE_DIRECTORY) -entry application -value system/controlDict
-    '''
-    try:
-        command = ["foamDictionary","-case",solver_dir, "-entry", "application", "-value", "system/controlDict"]
-        command_result = subprocess.run(command, capture_output=True, text=True)
-        solver_type = command_result.stdout
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error in reading the solver type: {e}")
+        Also, we can manually set the mesh type if we know it already. 
+        '''
+        if self.openfoam_config.mesh_type:
+            return self.openfoam_config.mesh_type
+        
+        system_dir = Path.joinpath(self.solver_dir, "system")
+        if Path.joinpath(system_dir, "blockMeshDict").exists():
+            mesh_type = "blockMesh"
+        elif Path.joinpath(system_dir, "snappyHexMeshDict").exists():
+            mesh_type = "snappyHexMesh"
+        else:
+            raise ValueError("The mesh type is not recognized. Please set the mesh type manually.")
+        return mesh_type
     
-    return solver_type.strip()
+    def _read_solver_type(self):
+        '''
+        Ensures the solver type used to solve the problem. foamDictionary command comes in very handy
+        to get the solver type.
 
-def update_time_foamDictionary(solver_dir:Path, present_time, end_time, time_step=0.01) -> bool:
-    '''
-    This function updates the time in the controlDict file. This is useful when you want to 
-    run the solver for a specific time. 
+        - Example: foamDictionary system/controlDict -entry application gives the application information 
+        of the case. Applying regular expression to the received output, we can get the solver type.
+        - solver_type information is also saved in the OpenfoamConfig class for future reference.
 
-    Args:
-    solver_dir: str: The path to the solver directory.
-    present_time: int: The present time of the simulation.
-    end_time: int: The end time of the simulation.
+        Args:
+        solver_dir: str: The path to the solver directory.
 
-    OpenFOAM command used:
-    1. Update the time in the controlDict file:
-    foamDictionary -case $(CASE_DIRECTORY) -set startTime=0,endTime=10,writeInterval=0.01 system/controlDict
-    '''
-    command_list = ["foamDictionary", "-case",solver_dir, "-set", 
-                    f"startTime={present_time},endTime={end_time},writeInterval={time_step}","system/controlDict"]
-    try:
-        command_result = subprocess.run(command_list, capture_output=True, text=True)
-        logger.debug(f"Time updated successfully: {command_result.stdout}")
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error in updating the time: {e}")
-        return False
-    return True
+        Returns:
+        solver_type: str: The solver type used to solve the problem.
+
+        OpenFOAM command used:
+        1. Get application type, like buoyantFoam, simpleFoam, etc.
+        foamDictionary -case $(CASE_DIRECTORY) -entry application -value system/controlDict
+        '''
+        if self.openfoam_config.solver_type:
+            return self.openfoam_config.solver_type
+
+        try:
+            command = ["foamDictionary",
+                       "-case",
+                       self.solver_dir, 
+                       "-entry", 
+                       "application", 
+                       "-value", 
+                       "system/controlDict"]
+            command_result = subprocess.run(command, capture_output=True, text=True)
+            solver_type = command_result.stdout
+        except subprocess.CalledProcessError as e:
+            self.openfoam_config.logger.exception(f"Error in reading the solver type: {e}")
+        
+        return solver_type.strip()
+    
+    @staticmethod
+    def run_subprocess(command_list:list):
+        '''
+        Run the subprocess command and return the output.
+        '''
+        command_result = subprocess.run(command_list, capture_output=True, text=True, check=True)
+        return command_result.stdout
+
+    @staticmethod
+    def parse_to_numpy(openfoam_config:OpenfoamConfig,
+                       solver_dir:Path=None,
+                       save_path:Path=None,
+                       variables:list=None,
+                       time_list:list[str]=None,
+                       del_dirs:bool=False) -> Path:
+        '''
+        OpenFOAM stores the data in the form of Dictionary(OpenFOAM type) files. But to train the model
+        it will be easier to change to tensors if we can convert them to numpy arrays. This method
+        does the same. To carry out this task, we can use the Ofpp library.
+
+        Args:
+        openfoam_config: OpenfoamConfig: The OpenFOAM configuration object.
+        solver_dir: str: The path to the solver directory where OpenFOAM has stored the data after 
+                         running the solver.
+        assets_dir: str: The path to the assets directory where we want to save the data in the numpy
+                         format. 
+        variables: list: The list of variables that we want to convert to numpy. If not provided, 
+                         it will be get from the OpenFOAM configuration.
+        time_list: list: The list of time directories that we want to parse to numpy. If not provided, 
+                         it will list the time directories.
+        del_dirs: bool: If True, it will delete the time directories after parsing the data to numpy.
+
+        OpenFOAM command used: 
+        1. List the time directories:
+        foamListTimes -case solver_dir
+        2. Deleting the time directories:
+        foamListTimes -case solver_dir -rm -time "1,2,3,4,5"
+
+        Returns:
+        assets_path: Path: The path to the assets directory where the data is saved in numpy format.
+        '''
+        solver_dir = solver_dir if solver_dir else openfoam_config.solver_dir
+        save_path = save_path if save_path else openfoam_config.assets_path
+        variables = variables if variables else openfoam_config.extend_variables()
+
+        if not time_list:# List the time directories
+            commands_to_list_time_directories = ["foamListTimes", "-case", solver_dir]
+            time_list = OpenfoamUtils.run_subprocess(commands_to_list_time_directories).split("\n")
+            time_list = [i for i in time_list if i]
+        time_directories = [Path(solver_dir,i) for i in time_list]
+
+        # Parse the data to numpy
+        for time_dir in time_directories:
+            for var in variables:
+                try:
+                    data = Ofpp.parse_internal_field(Path(time_dir, var))
+                    openfoam_config.logger.debug(f"Data parsed to numpy:{var}_{time_dir.name} --> {data.shape}")
+                    np.save(Path(save_path, f"{var}_{float(time_dir.name)}.npy"), data) # We are saving it in float because we want to keep things consistent.
+                except Exception as e:
+                    openfoam_config.logger.exception(f"Error in parsing the data to numpy: {e}")
+                    return False
+
+        if del_dirs:
+            #We save the last time directory for future reference.
+            command_to_delete_directories = ["foamListTimes", "-case", solver_dir,
+                                             "-rm", "-time",",".join(time_list[:-1])]
+            command_output = OpenfoamUtils.run_subprocess(command_to_delete_directories)
+            openfoam_config.logger.debug(f"Time directories deleted successfully: {command_output}")
+        
+        return save_path
+    
+    @staticmethod
+    def update_time_foamDictionary(openfoam_config:OpenfoamConfig,
+                                   solver_dir:Path=None,
+                                   start_time:float=None,
+                                   end_time:float=None,
+                                   write_interval:float=None) -> bool:
+        '''
+        This method updates the time in the controlDict file. This is useful when you want to 
+        run the solver for a specific time. 
+
+        Args:
+        openfoam_config: OpenfoamConfig: The OpenFOAM configuration object.
+        solver_dir: str: The path to the solver directory.
+        start_time: int: The time step from which we want to start the simulation.
+        end_time: int: The end time of the simulation.
+        write_interval: interval between two consecutive timestamps.
+
+        OpenFOAM command used:
+        1. Update the time in the controlDict file:
+        foamDictionary -case $(CASE_DIRECTORY) -set startTime=0,endTime=10,writeInterval=0.01 system/controlDict
+        '''
+        solver_dir = solver_dir if solver_dir else openfoam_config.solver_dir
+        start_time = start_time if start_time else openfoam_config.start_time
+        end_time = end_time if end_time else openfoam_config.end_time
+        write_interval = write_interval if write_interval else openfoam_config.write_interval
+
+        commands_to_update_time = ["foamDictionary",
+                                    "-case",
+                                    solver_dir,
+                                    "-set",
+                                    f"startTime={start_time},endTime={end_time},writeInterval={write_interval}",
+                                    "system/controlDict"]
+        
+        command_output = OpenfoamUtils.run_subprocess(commands_to_update_time)
+        openfoam_config.logger.debug(f"Time updated successfully: {command_output}")
+
+        return True
+
+    def run_solver(self, start_time=None,
+                   end_time=None,
+                   write_interval=None,
+                   save_to_numpy:bool=False,
+                   del_dirs:bool=False) -> bool:
+        '''
+        This method aims at running the CFD solver of your interest. 
+        For example:
+        In OpenFOAM, what you normally do is, clone the existing solver similar to the case you want to
+        solve, modify different parameters according to your requirements and then run the solver.
+        To run the solver you need to do these things: 
+        - Go to the solver directory
+        - Create the mesh
+        - Run the solver
+
+        So, this function tries to lift off these steps from your shoulder.
+
+        Args:
+        solver_path: str: The path to the solver directory. If not provided, it will ask you to
+                        provide the path.
+        assets_dir: str: The path to the assets directory. 
+
+        Returns:
+        assets_path: Path: The path to the assets directory where the data needs to be saved. 
+
+        Functionality: 
+        Saves the data in the Assets directory. 
+
+        OpenFOAM commands used:
+        1. Create the mesh:
+        blockMesh -case solver_dir
+        2. Run the solver:
+        buoyantFoam -case solver_dir
+        '''
+        start_time = start_time if start_time else self.openfoam_config.start_time
+        end_time = end_time if end_time else self.openfoam_config.end_time
+        write_interval = write_interval if write_interval else self.openfoam_config.write_interval
+
+        # Update the time in the controlDict file
+        self.update_time_foamDictionary(self.openfoam_config, start_time=start_time,
+                                        end_time=end_time, write_interval=write_interval)
+        self.openfoam_config.logger.debug(f"Time updated successfully: start_time={start_time} | end_time={end_time}|write_interval={write_interval}")
+
+        self.openfoam_config.logger.debug(f"Solver directory: {self.solver_dir}")
+
+        # Create the mesh
+        self.openfoam_config.logger.debug("Creating the mesh!")
+        command_to_create_mesh = [self.mesh_type, "-case", self.solver_dir]
+        mesh_result = self.run_subprocess(command_to_create_mesh)
+        self.openfoam_config.logger.debug(f"\n Mesh Output: {mesh_result}\n")
+
+        # Run the solver
+        command_to_run_solver = [self.solver_type, "-case", self.solver_dir]
+        with tqdm(total=1, desc="Running Solver", unit="step") as pbar:
+            solver_result = self.run_subprocess(command_to_run_solver)
+            pbar.update(1)
+        self.openfoam_config.logger.debug(f"\n Solver Output: {solver_result}\n")
+
+        if save_to_numpy:
+            self.parse_to_numpy(self.openfoam_config, del_dirs=del_dirs)
+
+        return True
 
 if __name__ == "__main__":
-    solver_dir = ROOT_DIR/"Solvers"/"natural_convection"
-    assets_dir = ROOT_DIR/"Assets"
-    # run_the_solver(solver_dir=solver_dir)
-    # update_time_foamDictionary(solver_dir=solver_dir, present_time=2, end_time=3)
-    # logger.info("Solver ran successfully!")
+    openfoam_config = OpenfoamConfig()
+    openfoam_utils = OpenfoamUtils(openfoam_config)
+    openfoam_utils.run_solver(save_to_numpy=True, del_dirs=True)

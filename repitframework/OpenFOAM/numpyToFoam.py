@@ -64,7 +64,7 @@ def numpyToFoam( variables:list,
 
     for variable in variables:
         openfoam_var_path = Path(str(latestML_time_dir) + f"/{variable}") # openfoam variable path: where we write the numpy data    
-        numpy_file_path =   Path(assets_path, f"{variable}_{latestML_time}.npy") # numpy file path: where the numpy data is stored
+        numpy_file_path =   Path(assets_path, f"{variable}_{float(latestML_time)}.npy") # numpy file path: where the numpy data is stored
         # numpy file processing:
         data = np.load(numpy_file_path)
         data_str = "(\n" + parse_numpy(data) + "\n)\n;" # convert numpy data to OpenFOAM format

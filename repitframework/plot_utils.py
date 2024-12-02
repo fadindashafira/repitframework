@@ -47,7 +47,7 @@ def visualize_output(np_data_dir:Path,
 	# Ensure the np_data_path is a pathlib.Path object
 	np_data_dir = Path(np_data_dir) if not isinstance(np_data_dir, Path) else np_data_dir
 	save_path = pwd / "plots" / np_data_dir.name if save_path is None else save_path
-	save_path.mkdir(exist_ok=True) if not save_path.exists() else None
+	save_path.mkdir(exist_ok=True, parents=True) if not save_path.exists() else None
 
 	data_dict:np.ndarray = {} 
 	'''
@@ -88,21 +88,23 @@ def visualize_output(np_data_dir:Path,
 def make_animation(np_data_dir:Path, 
 					timestamps:list[int|float], 
 					data_vars:list=["U", "T"], 
-					save_path:Path=None,
+					save_name:Path=None,
 					set_fps:int=1)->bool:
 	'''
 	This function is used to make an animation of the output of the simulation.
 	'''
 	# Ensure the np_data_path is a pathlib.Path object
 	np_data_dir = Path(np_data_dir) if not isinstance(np_data_dir, Path) else np_data_dir
-	save_path = pwd / "plots" / np_data_dir.name if save_path is None else save_path
-	save_path.mkdir(exist_ok=True) if not save_path.exists() else None
+	save_dir = pwd / "plots" / np_data_dir.name 
+	save_dir.mkdir(exist_ok=True) if not save_dir.exists() else None
+	save_path = Path.joinpath(save_dir, "output.gif") if not save_name else Path.joinpath(save_dir,save_name)
 
 	images_list = []
 	for timestamp in timestamps:
-		images_list.append(visualize_output(np_data_dir, timestamp, data_vars, save_path, mode="rgb_array"))
-	imageio.mimsave(save_path / "output.gif", images_list, fps=set_fps)
+		images_list.append(visualize_output(np_data_dir, timestamp, data_vars, mode="rgb_array"))
+	imageio.mimsave(save_path, images_list, fps=set_fps)
 	return True
 
 if __name__ == "__main__":
-	make_animation(np_data_dir=pwd / "logs/natural_convection", timestamps=[1,2,3,4,5,6], data_vars=["U", "T"])
+	make_animation(np_data_dir=pwd / "Assets/nc_original", timestamps=[float(i) for i in range(10,21)], 
+				data_vars=["U", "T"], set_fps=1, save_name="output_predicted.gif")
