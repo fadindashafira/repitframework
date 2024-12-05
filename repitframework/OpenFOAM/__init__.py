@@ -1,2 +1,2 @@
-from .utils import *
-from .numpyToFoam import *
+from .utils import OpenfoamUtils
+from .numpyToFoam import numpyToFoam, parse_numpy

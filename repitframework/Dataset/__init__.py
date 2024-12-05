@@ -1,1 +1,1 @@
-from fvmn import FVMNDataset
+from .fvmn import FVMNDataset

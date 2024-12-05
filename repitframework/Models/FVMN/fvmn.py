@@ -5,13 +5,19 @@ class FVMNetwork(torch.nn.Module):
     def __init__(self, training_config:TrainingConfig, vars_list:list=None,
                  hidden_layers:int=11, hidden_size:int=512, activation:torch.nn.ReLU=None):
         '''
-        Args: 
-        training_config: configuration classes are set to give minimum arguments during initialization.
-        vars_list: list containing the variables to be predicted. If None, it will be taken from the training_config.
-                    example: ["U_x", "U_y", "T"]
-        hidden_layers: number of hidden layers in the network
-        hidden_size: number of neurons in each hidden layer
-        activation: activation function to be used in the hidden
+        Args
+        ---- 
+        training_config: TrainingConfig:
+            configuration classes are set to give minimum arguments during initialization.
+        vars_list: list
+            list containing the variables to be predicted. If None, it will be taken from the training_config.
+            example: ["U_x", "U_y", "T"]
+        hidden_layers: int
+            number of hidden layers in the network
+        hidden_size: int 
+            number of neurons in each hidden layer
+        activation: 
+            activation function to be used in the hidden
         '''
         super().__init__()
         self.num_dims = training_config.data_dim

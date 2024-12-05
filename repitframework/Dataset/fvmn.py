@@ -1,15 +1,18 @@
-from torch.utils.data import Dataset
-import numpy as np
 from pathlib import Path
 from typing import Tuple
+
+from torch.utils.data import Dataset
+import numpy as np
 from torch import Tensor,mean, std
+
 from repitframework.config import TrainingConfig
 
 class FVMNDataset(Dataset):
     def __init__(self, training_config:TrainingConfig, data_path:Path=None, start_time:float=None, 
                  end_time:float=None, time_step:float=None, vars_list:list=None):
         '''
-        Keep in mind:
+        Keep in mind
+        ------------
         1. To prepare for the training data, we must have numpy files from start_time to end_time mentioned here.
         Example: 
         start_time = 0, end_time=5, then we must have numpy files from 0 to 5.
@@ -26,10 +29,13 @@ class FVMNDataset(Dataset):
         input_shape from 0 to 4: [(grid_x-2) * (grid_y-2) * 5, 15]
         label_shape from 1 to 5: [(grid_x-2) * (grid_y-2) * 5, 3]
 
-        Note:
-        vars_list: list containing the variables to be predicted. If None, it will be taken from the training_config.
-                    here, we should be careful that we are not extending the dimensions of variables like U_x, U_y, U_z (we did while creating the network).
-            example: ["U", "T"]
+        Note
+        ----
+        vars_list: 
+            list containing the variables to be predicted. If None, it will be taken from the training_config.
+            Here, we should be careful that we are not extending the dimensions of variables like
+            U_x, U_y, U_z (we did while creating the network).
+            Example: ["U", "T"]
         '''
         super().__init__()
         self.training_config = training_config
@@ -44,7 +50,7 @@ class FVMNDataset(Dataset):
 
         # First thing first, we must ensure that we have the data from start_time to end_time
         # in the data_path directory.
-        self.data_path = self.training_config.assets_dir if not data_path else Path(data_path)
+        self.data_path = self.training_config.assets_path if not data_path else Path(data_path)
         assert self.data_path.exists(), f"Data path: {self.data_path} doesn't exist."
         assert self._is_present(), f"Data is missing in the directory: {self.data_path}.\n\
                                     You must have data from {start_time} to {end_time} for variables: {self.vars}" 
@@ -109,13 +115,16 @@ class FVMNDataset(Dataset):
         Regarding the order of the variables in input data, two things matter: 
         1. The list of variables in the config file: "data_vars"
         2. The dimension of the data: 1D, 2D, 3D defined in the config file as "data_dim"
-        Example: 
+
+        Example
+        -------
         1. If data_vars = ["U", "T"] and data_dim = 2, then the order of the variables in the input data will be: 
             U_x, U_y, T
         2. If data_vars = ["T", "U"] and data_dim = 3, then the order of the variables in the input data will be:
             T, U_x, U_y, U_z
 
-        Functionality:
+        Functionality
+        -------------
         1. Load the numpy files from the data_path directory. [U_0.npy, T_0.npy]
         2. Parse the numpy files.
            a. If the data is VECTOR, split the data into x, y, z components. From this function: we get [200,200,2] shape.
@@ -191,7 +200,7 @@ class FVMNDataset(Dataset):
     
 if __name__ == "__main__":
     training_config = TrainingConfig()
-    data_path = training_config.assets_dir
+    data_path = training_config.assets_path
     start_time = 5.0
     end_time = 5.02
     time_step = 0.01

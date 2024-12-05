@@ -1,3 +1,1 @@
-from repitframework.plot_utils import pwd
-
-print(pwd)
+from .ResidualNaturalConvection import residual_heat, residual_mass, residual_momentum, residue

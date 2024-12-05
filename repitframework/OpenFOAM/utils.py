@@ -1,9 +1,11 @@
-import Ofpp
 from pathlib import Path
 import subprocess
-import numpy as np
-from repitframework.config import OpenfoamConfig
 from tqdm import tqdm
+
+import Ofpp
+import numpy as np
+
+from repitframework.config import OpenfoamConfig
 
 class OpenfoamUtils:
     def __init__(self, openfoam_config:OpenfoamConfig, 
@@ -235,7 +237,7 @@ class OpenfoamUtils:
         # Update the time in the controlDict file
         self.update_time_foamDictionary(self.openfoam_config, start_time=start_time,
                                         end_time=end_time, write_interval=write_interval)
-        self.openfoam_config.logger.debug(f"Time updated successfully: start_time={start_time} | end_time={end_time}|write_interval={write_interval}")
+        self.openfoam_config.logger.debug(f"Time updated successfully: start_time={start_time}|end_time={end_time}|write_interval={write_interval}")
 
         self.openfoam_config.logger.debug(f"Solver directory: {self.solver_dir}")
 

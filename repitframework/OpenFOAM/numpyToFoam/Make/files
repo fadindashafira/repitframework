@@ -1,3 +1,0 @@
-numpyToFoam.C
-
-EXE = $(FOAM_APPBIN)/numpyToFoam
