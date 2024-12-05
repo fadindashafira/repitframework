@@ -40,7 +40,7 @@ def parse_numpy(data: np.ndarray) -> str:
 
 
 def numpyToFoam(openfoam_config:OpenfoamConfig, 
-				latestML_time,
+				latestML_time:float,
 				latestCFD_time:int|float=None,
 				variables:list=None,
 				solver_dir:Path=None,
@@ -48,10 +48,13 @@ def numpyToFoam(openfoam_config:OpenfoamConfig,
 				is_ground_truth:bool=False) -> bool:
 	"""
 	This function takes a numpy file and writes it to an OpenFOAM file.
-	Example: 
+
+	Example
+	-------
 	If we have a numpy file U_3.npy, we can write it to the OpenFOAM file U at time t=3.
 
-	Args:
+	Args
+	----
 	openfoam_config: The OpenFOAM configuration object.
 	latestML_time:  The final time step for which ML simulation is present. 
 	latestCFD_time: The final time step for which OpenFOAM file is already present.
@@ -61,14 +64,20 @@ def numpyToFoam(openfoam_config:OpenfoamConfig,
 	is_ground_truth: If True, it will load the ground truth data. If False, it will load the predicted data.
 					 Because, for the predicted cases we will have var_timestamp_predicted.npy files.
 
-	**************** NOTE ****************
+	NOTE
+	----
 	The latestCFD_time should be the time step for which the OpenFOAM file is already present. 
 	Because, we need to copy format to the present time step for which we are trying to run the 
 	simulation.
-	**************************************
 
-	Returns:
+	Returns
+	-------
 	True if the function executes successfully.
+
+	Remember
+	--------
+	latestML_time should always be float value. Because, while saving any value to numpy, we save it as float.
+	see: repitframework/OpenFOAM/utils.py: parse_numpy
 	"""
 	solver_dir = Path(solver_dir) if solver_dir else openfoam_config.solver_dir
 	assets_path = Path(assets_path) if assets_path else openfoam_config.assets_path
@@ -78,7 +87,7 @@ def numpyToFoam(openfoam_config:OpenfoamConfig,
 		command_to_list_time_directories = ["foamListTimes", "-case", solver_dir]
 		command_result = subprocess.run(command_to_list_time_directories,capture_output=True ,text=True, check=True)
 		time_list = command_result.stdout.split("\n")
-		time_list = [round(time,2) for time in time_list if time.strip()]
+		time_list = [round(time,openfoam_config.round_to) for time in time_list if time.strip()]
 		latestCFD_time = max(time_list)
 
 	latestCFD_time_dir = Path.joinpath(solver_dir,f"{latestCFD_time}") # time directory for current time
@@ -109,4 +118,4 @@ def numpyToFoam(openfoam_config:OpenfoamConfig,
 	
 if __name__ == "__main__":
 	openfoam_config = OpenfoamConfig()
-	numpyToFoam(openfoam_config, latestML_time=10.04)
+	numpyToFoam(openfoam_config, latestCFD_time=9, latestML_time=10.0, is_ground_truth=True)

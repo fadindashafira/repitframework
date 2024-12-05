@@ -62,7 +62,7 @@ class FVMNDataset(Dataset):
     def _is_present(self) -> bool:
         for var in self.vars:
             for time in np.arange(self.start_time, self.end_time+self.time_step, self.time_step):
-                if not (self.data_path / f"{var}_{time}.npy").exists():
+                if not (self.data_path / f"{var}_{round(time, self.training_config.round_to)}.npy").exists():
                     return False
         return True
     
@@ -160,15 +160,17 @@ class FVMNDataset(Dataset):
         5 - 4: 5th label
         '''
         data_t = self._prepare_input(time)
-        data_t_next = self._prepare_input(time + self.time_step)
+        data_t_next = self._prepare_input(round(time + self.time_step, self.training_config.round_to))
         return data_t_next[:,::5] - data_t[:,::5]
     
     @staticmethod
-    def normalize(data) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    def normalize(data) -> Tensor:
+        if isinstance(data, Tensor):
+            data = data.numpy()
         mean = np.mean(data, axis=0)
         std = np.std(data, axis=0)
         normalized_data = (data - mean)/std
-        return normalized_data
+        return Tensor(normalized_data)
     
     @staticmethod
     def denormalize(data:Tensor)->Tensor:
@@ -176,7 +178,7 @@ class FVMNDataset(Dataset):
         std_ = std(data, axis=0)
         return (data * std_) + mean_
     
-    def _prepare_inputs_and_labels(self) -> Tuple[np.ndarray, np.ndarray]:
+    def _prepare_inputs_and_labels(self) -> Tuple[Tensor, Tensor]:
         inputs, labels = [], []
         for time in np.round(np.arange(self.start_time, self.end_time, self.time_step),2):
             inputs.append(self._prepare_input(time))

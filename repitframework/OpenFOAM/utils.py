@@ -180,9 +180,10 @@ class OpenfoamUtils:
         foamDictionary -case $(CASE_DIRECTORY) -set startTime=0,endTime=10,writeInterval=0.01 system/controlDict
         '''
         solver_dir = solver_dir if solver_dir else openfoam_config.solver_dir
-        start_time = start_time if start_time else openfoam_config.start_time
-        end_time = end_time if end_time else openfoam_config.end_time
         write_interval = write_interval if write_interval else openfoam_config.write_interval
+        round_to = len(str(write_interval).split(".")[-1])
+        start_time = round(start_time,round_to) if start_time else openfoam_config.start_time
+        end_time = round(end_time,round_to) if end_time else openfoam_config.end_time
 
         commands_to_update_time = ["foamDictionary",
                                     "-case",
@@ -230,10 +231,10 @@ class OpenfoamUtils:
         2. Run the solver:
         buoyantFoam -case solver_dir
         '''
-        start_time = start_time if start_time else self.openfoam_config.start_time
-        end_time = end_time if end_time else self.openfoam_config.end_time
         write_interval = write_interval if write_interval else self.openfoam_config.write_interval
-
+        round_to = len(str(write_interval).split(".")[-1])
+        start_time = round(start_time,round_to) if start_time else self.openfoam_config.start_time
+        end_time = round(end_time,round_to) if end_time else self.openfoam_config.end_time
         # Update the time in the controlDict file
         self.update_time_foamDictionary(self.openfoam_config, start_time=start_time,
                                         end_time=end_time, write_interval=write_interval)
@@ -262,4 +263,4 @@ class OpenfoamUtils:
 if __name__ == "__main__":
     openfoam_config = OpenfoamConfig()
     openfoam_utils = OpenfoamUtils(openfoam_config)
-    openfoam_utils.run_solver(save_to_numpy=True, del_dirs=True)
+    openfoam_utils.run_solver(start_time=10.0, end_time=20.0, write_interval=0.01,save_to_numpy=True, del_dirs=True)

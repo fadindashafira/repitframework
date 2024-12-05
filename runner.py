@@ -144,11 +144,15 @@ class Trainer:
             while (self.residual_mass[-1] <= training_config.residual_threshold) and (running_time < training_config.prediction_end_time):
                 first_prediction = True if running_time == start_time else False
                 prediction_input = self.prepare_input_for_prediction(running_time, data_path, first_prediction, prediction_input)
-                predicted_output = self.model(prediction_input)
+                predicted_output = self.model(FVMNDataset.normalize(prediction_input).to(self.device))
                 denormed_output = FVMNDataset.denormalize(predicted_output.cpu())
                 prediction_input = prediction_input[:, ::5] + denormed_output
                 running_time += time_step
-        
+
+            # Because prepare_input_for_prediction function calculates the residual values.
+            # Hence, even if the residue value exceeds the threshold, the running time will be updated.
+            # So, we need to step down the running time by the write interval outside the loop.
+            running_time -= self.training_config.write_interval
         return round(running_time, 2)
     
     def save_model(self, model_name:str) -> Path:
@@ -283,7 +287,7 @@ class Trainer:
         temp_ = [FVMNDataset.add_feature(data) for data in temp]
         data = np.concatenate(temp_, axis=1)
 
-        return torch.Tensor(FVMNDataset.normalize(data))
+        return torch.Tensor(data).to(self.device)
 
 if __name__ == "__main__":
     openfoam_config = OpenfoamConfig()
@@ -307,6 +311,7 @@ if __name__ == "__main__":
     training_config.logger.info(f"Framework started at {framework_start_time}")
 
     while running_time < training_config.prediction_end_time:
+        print("Running time: ", running_time)
         # Run CFD first:
         is_time_update = openfoam_utils.update_time_foamDictionary(openfoam_config=openfoam_config, 
                                                                    start_time=start_time, 
@@ -327,7 +332,7 @@ if __name__ == "__main__":
 
         # Convert predicted numpy to foam
         is_numpy_to_foam = numpyToFoam(openfoam_config=openfoam_config, 
-                                       latestML_time=running_time, 
+                                       latestML_time=float(running_time), 
                                        latestCFD_time=end_time)
 
         # Transfer learning

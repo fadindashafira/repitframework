@@ -36,6 +36,7 @@ class BaseConfig:
 	grid_z: int = 1 # Number of grid points in z-direction
 	grid_step: int|float = 0.005 # Grid step size
 	write_interval: int|float = 0.01 # Time step size
+	round_to: int = len(str(write_interval).split(".")[-1]) # Number of decimal places to round to
 
 	def get_variables(self, vars_dict:dict=None):
 		"""
@@ -124,6 +125,8 @@ class OpenfoamConfig(BaseConfig):
 		self.logger = self.setup_logger("OpenFOAMLogger",self.log_file)
 		self.start_time = 0
 		self.end_time = 2
+		self.start_time = round(self.start_time, self.round_to)
+		self.end_time = round(self.end_time, self.round_to)
 
 class TrainingConfig(BaseConfig):
 	def __init__(self):
