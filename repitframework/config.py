@@ -132,7 +132,7 @@ class TrainingConfig(BaseConfig):
 	def __init__(self):
 		super().__init__()
 		self.batch_size: int = 10000
-		self.epochs: int = 1
+		self.epochs: int = 5000
 		self.learning_rate: float = 0.001
 		self.residual_threshold: float = 0.001
 		self.device: str = "cuda" if cuda.is_available() else "cpu"
@@ -148,9 +148,15 @@ class TrainingConfig(BaseConfig):
 		self.log_file: Path = Path("Training.log")
 		self.logger = self.setup_logger("TrainingLogger",self.log_file)
 
+		@property
+		def set_epochs(self, epochs:int):
+			self.epochs = epochs
+			return self.epochs
+
 if __name__ == "__main__":
 	openfoam_config = OpenfoamConfig()
 	base_config = BaseConfig()
+	training_config = TrainingConfig()
 
 	# Testing logger:
 	base_config.logger.info("Testing BaseConfig logger")

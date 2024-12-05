@@ -175,6 +175,10 @@ class Trainer:
         return path
 
     def load_model(self, model_name:str):
+        """
+        This is for transfer learning. We load the model from the saved model.
+        Epochs= 20
+        """
         path = Path.joinpath(self.training_config.model_dir, model_name)
         self.model.load_state_dict(torch.load(path, weights_only=True))
         self.training_config.logger.info(f"Model loaded from {path}")
@@ -339,6 +343,7 @@ if __name__ == "__main__":
         start_time = running_time
         end_time = round(start_time + 2*training_config.write_interval,2)
         model = trainer.load_model("best_model.pth")
+        training_config.epochs = 20
 
         training_loss.extend(trainer.losses["train"])
         validation_loss.extend(trainer.losses["val"])
