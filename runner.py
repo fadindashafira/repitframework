@@ -1,14 +1,15 @@
-'''
+__doc__ ='''
 Steps to re-create the RePIT project:
 
-Step 1: Convert 10th time step data from numpy to foam.
-Step 2: Generate the whole time steps from 10 to 20 using 0.01 time step as write interval (record the time it takes to run the simulation).
-Step 3: Use 10.0 to 10.03 time step data as training data. 
+Step 1: Convert 10th timestamp data from numpy to foam.
+Step 2: Generate the whole time steps from 10 to 20 using 0.01 timestamp as write interval (record the time it takes to run the simulation).
+Step 3: Use 10.0 to 10.03 timestamp data as training data. 
 Step 4: After the training is done using hyperparameters as same as in RePIT: lr= 0.001, epoch=5000, batch_size=10000, optimizer=Adam, loss=MSE.
-Step 5: Use the trained model to predict from the time step 10.04 until residue exceeds 0.001 (Average residual mass).
-Step 6: Use two time steps from the predicted time steps to enable transfer learning. 
-Step 7: And REPEAT the process until the time step 20.0 is reached.
+Step 5: Use the trained model to predict from the timestamp 10.04 until residue exceeds 0.001 (Average residual mass).
+Step 6: Use two time steps from the predicted timestamps to enable transfer learning. 
+Step 7: And REPEAT the process until the timestamp 20.0 is reached.
 '''
+
 from typing import Tuple, List
 from pathlib import Path
 import timeit
@@ -189,16 +190,24 @@ class Trainer:
         Because in FVMN, we are only predicting the interior points, we need to add the boundary data to the model output.
         So, that we can again extract the features as we did for the training data and normalize it and again give it as input to the model.
 
-        Args: 
-        model_output_data: torch.Tensor: The output from the model after denormalizing and adding with the input.
-        data_path: Path: if we predict for time step 5.03 then we need the original data for the time step 5.03 to get the boundary data.
-                        this is the path to that data.
-        time_step: float: the time step for which we are predicting. e.g., 5.03
-        first_prediction: bool: If this is the first prediction, we return the whole data. Else, we set the all the other except boundary to zero.
+        Args
+        ---- 
+        model_output_data: torch.Tensor: 
+            The output from the model after denormalizing and adding with the input.
+        data_path: Path: 
+            If we predict for time step 5.03 then we need the original data for the 
+            time step 5.03 to get the boundary data.This is the path to that data.
+        time_step: float: 
+            The time step for which we are predicting. e.g., 5.03
+        first_prediction: bool: 
+            If this is the first prediction, we return the whole data. 
+            Else, we set the all the other except boundary to zero.
 
-        Returns:
-        List[np.ndarray]: List of numpy arrays. Each numpy array is the data for each variable separated dimension wise:
-        e.g., [U_x, U_y, T] for each variable.
+        Returns
+        -------
+        List[np.ndarray]: 
+            Each numpy array is the data for each variable separated dimension wise:
+            e.g., [U_x, U_y, T] for each variable.
         '''
         data_path = data_path if data_path else self.training_config.assets_path
         variables = self.training_config.extend_variables()
@@ -224,10 +233,14 @@ class Trainer:
 
         Args
         ----
-        time_step: The time step for which we are predicting.
-        data: torch.Tensor: The output from the model after denormalizing and adding with the input [batch_size, num_features]
-        data_path: Path: if we predict for time step 5.03 then we need the original data for the time step 5.03 to get the boundary data.
-        first_prediction: bool: If this is the first prediction, we return the whole data. Else, we set the all the other except boundary to zero.
+        time_step: int|float:
+            If we are predicting for t then time_step = t-dt.
+        data: torch.Tensor: 
+            The output from the model after denormalizing and adding with the input [batch_size, num_features]
+        data_path: Path: 
+            if we predict for time step 5.03 then we need the original data for the time step 5.03 to get the boundary data.
+        first_prediction: bool: 
+            If this is the first prediction, we return the whole data. Else, we set the all the other except boundary to zero.
 
         Functionality
         -------------
@@ -238,6 +251,10 @@ class Trainer:
            We leverage this to get the index of U_x, U_y, T.
         5. If it is not the first prediction, we are setting U_x and T values in that iteration as previous values 
            and as the process progresses, we update the previous values with the predicted values.
+        6. We save the predicted values here. In the prediction loop, we get the output for time(running_time) + dt.
+           So, it makes sense that we can update the running time, and while preparing input for the next prediction, 
+           we can add boundary values to the prev. predicted values and that would represent the predicted values for 
+           currently running_time in prediction loop.
 
         Reasoning
         ---------

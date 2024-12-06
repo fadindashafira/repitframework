@@ -59,15 +59,11 @@ class OpenfoamUtils:
         of the case. Applying regular expression to the received output, we can get the solver type.
         - solver_type information is also saved in the OpenfoamConfig class for future reference.
 
-        Args:
-        solver_dir: str: The path to the solver directory.
+        OpenFOAM command used
+        ---------------------
+        1. Get application type, like buoyantFoam, simpleFoam, etc::
 
-        Returns:
-        solver_type: str: The solver type used to solve the problem.
-
-        OpenFOAM command used:
-        1. Get application type, like buoyantFoam, simpleFoam, etc.
-        foamDictionary -case $(CASE_DIRECTORY) -entry application -value system/controlDict
+            foamDictionary -case $(CASE_DIRECTORY) -entry application -value system/controlDict
         '''
         if self.openfoam_config.solver_type:
             return self.openfoam_config.solver_type
@@ -107,26 +103,38 @@ class OpenfoamUtils:
         it will be easier to change to tensors if we can convert them to numpy arrays. This method
         does the same. To carry out this task, we can use the Ofpp library.
 
-        Args:
-        openfoam_config: OpenfoamConfig: The OpenFOAM configuration object.
-        solver_dir: str: The path to the solver directory where OpenFOAM has stored the data after 
-                         running the solver.
-        assets_dir: str: The path to the assets directory where we want to save the data in the numpy
-                         format. 
-        variables: list: The list of variables that we want to convert to numpy. If not provided, 
-                         it will be get from the OpenFOAM configuration.
-        time_list: list: The list of time directories that we want to parse to numpy. If not provided, 
-                         it will list the time directories.
-        del_dirs: bool: If True, it will delete the time directories after parsing the data to numpy.
+        Args
+        ----
+        openfoam_config: OpenfoamConfig: 
+            The OpenFOAM configuration object.
+        solver_dir: str: 
+            The path to the solver directory where OpenFOAM has stored the data after 
+            running the solver.
+        assets_dir: str: 
+            The path to the assets directory where we want to save the data in the numpy
+            format. 
+        variables: list: 
+            The list of variables that we want to convert to numpy. If not provided, 
+            it will be get from the OpenFOAM configuration.
+        time_list: list: 
+            The list of time directories that we want to parse to numpy. If not provided, 
+            it will list the time directories.
+        del_dirs: bool: 
+            If True, it will delete the time directories after parsing the data to numpy.
 
-        OpenFOAM command used: 
-        1. List the time directories:
-        foamListTimes -case solver_dir
-        2. Deleting the time directories:
-        foamListTimes -case solver_dir -rm -time "1,2,3,4,5"
+        OpenFOAM command used
+        --------------------- 
+        1. List the time directories::
 
-        Returns:
-        assets_path: Path: The path to the assets directory where the data is saved in numpy format.
+            foamListTimes -case solver_dir
+        2. Deleting the time directories::
+
+            foamListTimes -case solver_dir -rm -time "1,2,3,4,5"
+
+        Returns
+        -------
+        assets_path: Path: 
+            The path to the assets directory where the data is saved in numpy format.
         '''
         solver_dir = solver_dir if solver_dir else openfoam_config.solver_dir
         save_path = save_path if save_path else openfoam_config.assets_path
@@ -168,16 +176,24 @@ class OpenfoamUtils:
         This method updates the time in the controlDict file. This is useful when you want to 
         run the solver for a specific time. 
 
-        Args:
-        openfoam_config: OpenfoamConfig: The OpenFOAM configuration object.
-        solver_dir: str: The path to the solver directory.
-        start_time: int: The time step from which we want to start the simulation.
-        end_time: int: The end time of the simulation.
-        write_interval: interval between two consecutive timestamps.
+        Args
+        ----
+        openfoam_config: OpenfoamConfig: 
+            The OpenFOAM configuration object.
+        solver_dir: str:
+            The path to the solver directory.
+        start_time: int|float: 
+            The time step from which we want to start the simulation.
+        end_time: int|float: 
+            The end time of the simulation.
+        write_interval: int|float: 
+            interval between two consecutive timestamps.
 
-        OpenFOAM command used:
-        1. Update the time in the controlDict file:
-        foamDictionary -case $(CASE_DIRECTORY) -set startTime=0,endTime=10,writeInterval=0.01 system/controlDict
+        OpenFOAM command used
+        ---------------------
+        - Update the time in the controlDict file::
+
+            foamDictionary -case $(CASE_DIRECTORY) -set startTime=0,endTime=10,writeInterval=0.01 system/controlDict
         '''
         solver_dir = solver_dir if solver_dir else openfoam_config.solver_dir
         write_interval = write_interval if write_interval else openfoam_config.write_interval
@@ -204,32 +220,52 @@ class OpenfoamUtils:
                    del_dirs:bool=False) -> bool:
         '''
         This method aims at running the CFD solver of your interest. 
-        For example:
-        In OpenFOAM, what you normally do is, clone the existing solver similar to the case you want to
-        solve, modify different parameters according to your requirements and then run the solver.
+
+        Args
+        ----
+        start_time: int|float:
+            The time step from which we want to start the simulation.
+        end_time: int|float:
+            The end time of the simulation.
+        write_interval: int|float:
+            interval between two consecutive timestamps.
+        save_to_numpy: bool:
+            If True, it will save the data in the numpy format.
+        del_dirs: bool:
+            If True, it will delete the time directories after parsing the data to numpy.
+            NOTE: But keeps the last time directory for future reference. 
+
+        Returns
+        -------
+        bool: 
+            Just in case. 
+
+        Functionality
+        -------------
+        - Updates the time in the controlDict file.
+        - Creates the mesh.
+        - Runs the solver.
+        - Saves the data in the Assets directory. 
+
+        Example
+        -------
+        In OpenFOAM, what you normally do is, clone the existing solver similar to the case you want
+        to solve, modify different parameters according to your requirements and then run the solver.
         To run the solver you need to do these things: 
         - Go to the solver directory
         - Create the mesh
         - Run the solver
-
+        
         So, this function tries to lift off these steps from your shoulder.
 
-        Args:
-        solver_path: str: The path to the solver directory. If not provided, it will ask you to
-                        provide the path.
-        assets_dir: str: The path to the assets directory. 
+        OpenFOAM commands used
+        ----------------------
+        - Create the mesh::
 
-        Returns:
-        assets_path: Path: The path to the assets directory where the data needs to be saved. 
-
-        Functionality: 
-        Saves the data in the Assets directory. 
-
-        OpenFOAM commands used:
-        1. Create the mesh:
-        blockMesh -case solver_dir
-        2. Run the solver:
-        buoyantFoam -case solver_dir
+            blockMesh -case solver_dir
+        - Run the solver::
+            
+            buoyantFoam -case solver_dir
         '''
         write_interval = write_interval if write_interval else self.openfoam_config.write_interval
         round_to = len(str(write_interval).split(".")[-1])

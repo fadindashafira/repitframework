@@ -11,7 +11,7 @@ class FVMNetwork(torch.nn.Module):
             configuration classes are set to give minimum arguments during initialization.
         vars_list: list
             list containing the variables to be predicted. If None, it will be taken from the training_config.
-            example: ["U_x", "U_y", "T"]
+            e.g: ["U_x", "U_y", "T"]
         hidden_layers: int
             number of hidden layers in the network
         hidden_size: int 

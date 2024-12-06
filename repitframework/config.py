@@ -44,11 +44,15 @@ class BaseConfig:
 		we need to combine them into a single list. We need to further differentiate vectors 
 		based on the number of dimensions (1D or 2D or 3D).
 
-		Args:
-			vars_dict (dict): The dictionary containing the variables separated into vectors and scalars.
+		Args
+		----
+		vars_dict: dict: 
+			The dictionary containing the variables separated into vectors and scalars.
 
-		Returns:
-			list: The list of variables: ["U_x", "U_y", "T"]
+		Returns
+		-------
+		list: 
+			The list of variables: ["U_x", "U_y", "T"]
 		"""
 		self.data_vars = self.data_vars if vars_dict is None else vars_dict
 		vars_list = []
@@ -69,14 +73,19 @@ class BaseConfig:
 	
 	def extend_variables(self, vars_dict:dict=None):
 		'''
-		There are cases where we don't exactly need dimension separated variables, just the variables themselves just like 
-		how they are represented in OpenFOAM. Hence, this method is to return the variables as they are, as a list.
+		There are cases where we don't exactly need dimension separated variables, 
+		just the variables themselves just like how they are represented in OpenFOAM. 
+		Hence, this method is to return the variables as they are, as a list.
 
-		Args:
-			vars_dict (dict): The dictionary containing the variables separated into vectors and scalars.
+		Args
+		----
+		vars_dict: dict:
+			The dictionary containing the variables separated into vectors and scalars.
 		
-		Returns:
-			list: The list of variables: ["U", "T"]
+		Returns
+		-------
+		list: 
+			The list of variables: ["U", "T"]
 		'''
 		vars_dict = self.data_vars if vars_dict is None else vars_dict
 		return [var for _, value in vars_dict.items() for var in value]
@@ -85,12 +94,17 @@ class BaseConfig:
 		"""
 		Sets up and returns a logger instance.
 
-		Args:
-			log_file (Path): The file path where logs will be saved.
-			level (int): Logging level (e.g., logging.DEBUG).
+		Args
+		----
+		name: str: 
+			The name of the logger.
+		log_file: Path: 
+			The file path where logs will be saved.
 
-		Returns:
-			logging.Logger: Configured logger.
+		Returns
+		-------
+		logging.Logger: 
+			Configured logger.
 		"""
 		level = self.logger_level
 		logger = logging.getLogger(name)

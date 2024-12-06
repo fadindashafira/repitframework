@@ -10,14 +10,19 @@ def parse_numpy(data: np.ndarray) -> str:
 	"""
 	Convert a NumPy array to a string representation suitable for OpenFOAM field files.
 
-	Parameters:
-	- data (np.ndarray): The NumPy array to convert.
+	Args
+	----------
+	data: np.ndarray: 
+		The NumPy array to convert.
 
-	Returns:
-	- str: The string representation of the data.
-
-	Raises:
-	- ValueError: If the data shape is not supported.
+	Returns
+	-------
+	parsed_output: str: 
+		The string representation of the data enclosed by parenthesis.
+	
+	Example
+	-------
+		"(1 2 3)\\n(4 5 6)\\n(7 8 9)"
 	"""
 	if data.ndim == 1:
 		# 1D array of scalars
@@ -49,20 +54,23 @@ def numpyToFoam(openfoam_config:OpenfoamConfig,
 	"""
 	This function takes a numpy file and writes it to an OpenFOAM file.
 
-	Example
-	-------
-	If we have a numpy file U_3.npy, we can write it to the OpenFOAM file U at time t=3.
-
 	Args
 	----
-	openfoam_config: The OpenFOAM configuration object.
-	latestML_time:  The final time step for which ML simulation is present. 
-	latestCFD_time: The final time step for which OpenFOAM file is already present.
-	variables: The OpenFOAM variables list.
-	solver_dir: The directory of the solver insider "Solvers" directory e.g: "Solvers/natural_convection"
-	assets_path: The path to the assets directory where the numpy files are stored: e.g: "Assets/natural_convection"
-	is_ground_truth: If True, it will load the ground truth data. If False, it will load the predicted data.
-					 Because, for the predicted cases we will have var_timestamp_predicted.npy files.
+	openfoam_config: OpenfoamConfig:
+		The OpenFOAM configuration object.
+	latestML_time: float 
+		The final time step for which ML simulation is present. 
+	latestCFD_time: int|float
+		The final time step for which OpenFOAM file is already present.
+	variables: list()
+		The OpenFOAM variables list.
+	solver_dir: Path
+		The directory of the solver insider "Solvers" directory e.g: "Solvers/natural_convection"
+	assets_path: Path
+		The path to the assets directory where the numpy files are stored: e.g: "Assets/natural_convection"
+	is_ground_truth: bool
+		If True, it will load the ground truth data. If False, it will load the predicted data.
+		Because, for the predicted cases we will have var_timestamp_predicted.npy files.
 
 	NOTE
 	----
@@ -78,6 +86,10 @@ def numpyToFoam(openfoam_config:OpenfoamConfig,
 	--------
 	latestML_time should always be float value. Because, while saving any value to numpy, we save it as float.
 	see: repitframework/OpenFOAM/utils.py: parse_numpy
+
+	Example
+	-------
+	If we have a numpy file U_3.npy, we can write it to the OpenFOAM file U at time t=3.
 	"""
 	solver_dir = Path(solver_dir) if solver_dir else openfoam_config.solver_dir
 	assets_path = Path(assets_path) if assets_path else openfoam_config.assets_path
