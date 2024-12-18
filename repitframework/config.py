@@ -148,24 +148,19 @@ class TrainingConfig(BaseConfig):
 		self.batch_size: int = 10000
 		self.epochs: int = 5000
 		self.learning_rate: float = 0.001
-		self.residual_threshold: float = 0.001
+		self.residual_threshold: float = 5.0 # Adapted from the paper: Section 4.1; page 8
 		self.device: str = "cuda" if cuda.is_available() else "cpu"
 		self.optimizer = torch.optim.Adam
 		self.loss = torch.nn.MSELoss()
 		self.activation = torch.nn.ReLU
 
 		self.training_start_time = 10.0
-		self.training_end_time = 10.03
-		self.prediction_start_time = 10.03
-		self.prediction_end_time = 20.0
+		self.training_end_time = 10.02
+		self.prediction_start_time = 10.02
+		self.prediction_end_time = 10.05
 
 		self.log_file: Path = Path("Training.log")
 		self.logger = self.setup_logger("TrainingLogger",self.log_file)
-
-		@property
-		def set_epochs(self, epochs:int):
-			self.epochs = epochs
-			return self.epochs
 
 if __name__ == "__main__":
 	openfoam_config = OpenfoamConfig()

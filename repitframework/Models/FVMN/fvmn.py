@@ -48,7 +48,7 @@ class FVMNetwork(torch.nn.Module):
         input_shape = 15
         output_shape = 1
         layers = [torch.nn.Linear(input_shape, self.hidden_size), self.activation()]
-        for _ in range(self.hidden_layers - 1):
+        for _ in range(self.hidden_layers):
             layers.extend([torch.nn.Linear(self.hidden_size, self.hidden_size), self.activation()])
         layers.append(torch.nn.Linear(self.hidden_size, output_shape))
         return torch.nn.Sequential(*layers)

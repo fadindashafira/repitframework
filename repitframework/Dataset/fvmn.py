@@ -42,7 +42,7 @@ class FVMNDataset(Dataset):
         self.start_time = self.training_config.training_start_time if not start_time else start_time
         self.end_time = self.training_config.training_end_time if not end_time else end_time
         self.vars: list = self.training_config.extend_variables() if not vars_list else vars_list
-        self.time_step = self.training_config.time_step if not time_step else time_step   
+        self.time_step = self.training_config.write_interval if not time_step else time_step   
 
         self.grid_x = self.training_config.grid_x
         self.grid_y = self.training_config.grid_y
@@ -52,8 +52,9 @@ class FVMNDataset(Dataset):
         # in the data_path directory.
         self.data_path = self.training_config.assets_path if not data_path else Path(data_path)
         assert self.data_path.exists(), f"Data path: {self.data_path} doesn't exist."
-        assert self._is_present(), f"Data is missing in the directory: {self.data_path}.\n\
-                                    You must have data from {start_time} to {end_time} for variables: {self.vars}" 
+        assert self._is_present(), \
+            f"\nData is missing in the directory: {self.data_path}:\n" + \
+            f"You must have data from {start_time} to {end_time} for variables: {self.vars}. Example: {self.vars[0]}_{start_time}.npy"
         assert self.start_time != 0, "Start time can't be zero. We don't have functionality to implement initial condition in the dataset."     
         ############ ----------------------------------------------############
         # Preprocess inputs and labels:
@@ -68,6 +69,32 @@ class FVMNDataset(Dataset):
     
     @staticmethod
     def parse_numpy(training_config:TrainingConfig, data_path:Path) -> np.ndarray:
+        '''
+        This function is used to parse the numpy files.
+        1. If the data is VECTOR, split the data into x, y, z components.
+        2. If the data is SCALAR, keep the data as it is.
+        3. Reshape the data into shapes defined in training_config: grid_x, grid_y
+           using C-order i.e row-major order because OpenFOAM stores the data in row-major order.
+
+        Args
+        ----
+        training_config: TrainingConfig
+            The training configuration object.
+        data_path: Path
+            The full path to the numpy file.
+
+        Returns
+        -------
+        parsed_data: np.ndarray
+        - If the data is VECTOR, it will return [grid_y, grid_x, 2] shape.
+        - If the data is SCALAR, it will return [grid_y, grid_x] shape.
+
+        Example
+        -------
+        Let's say we have saved data from OpenFOAM to numpy as U_1.npy,\n
+        and it is two-dimensional data with grid_x=200, grid_y=200.\n
+        This function will return [200, 200, 2] shape.
+        '''
 
         grid_x = training_config.grid_x
         grid_y = training_config.grid_y
@@ -98,6 +125,27 @@ class FVMNDataset(Dataset):
 
     @staticmethod
     def add_feature(input_matrix:np.ndarray) -> np.ndarray:
+        '''
+        This function is used to add correlated features to the data.
+                  |        |
+                  | (x-1,y)|                 
+        ----------|--------|---------      
+         (x,y-1)  |  (x,y) | (x,y+1)   ---> [(x,y), (x-1,y), (x+1,y), (x,y-1), (x,y+1)]
+        ----------|--------|---------
+                  |(x-1,y) | 
+                  |        |
+                     
+        Args
+        ----
+        input_matrix: np.ndarray
+            The input data matrix. Example Shape: [200,200]
+
+        Returns
+        -------
+        correlated_features: np.ndarray
+            The correlated features. Example Shape: [39204, 5]
+
+        '''
         window_shape = (3, 3)
         sliding_window = np.lib.stride_tricks.sliding_window_view(input_matrix, window_shape)
         x,y = window_shape[0] // 2, window_shape[1] // 2 
@@ -107,7 +155,7 @@ class FVMNDataset(Dataset):
             sliding_window[:,:,x+1,y],
             sliding_window[:,:,x,y-1],
             sliding_window[:,:,x,y+1]
-        ], axis=-1)
+        ], axis=1)
         return correlated_features.reshape(-1, 5)
     
     def _prepare_input(self, time) -> np.ndarray:
@@ -164,19 +212,37 @@ class FVMNDataset(Dataset):
         return data_t_next[:,::5] - data_t[:,::5]
     
     @staticmethod
-    def normalize(data) -> Tensor:
+    def normalize(data) -> Tuple[Tensor, float, float]:
+        '''
+        Normalize the data.
+        Args
+        ----
+        data: np.ndarray
+            The data to be normalized.
+
+        Returns
+        -------
+        normalized_data: Tensor
+            The normalized data.
+        mean: float
+            The mean of the data.
+        std: float
+            The standard deviation of the data.
+        '''
         if isinstance(data, Tensor):
-            data = data.numpy()
+            data = data.cpu().numpy()
         mean = np.mean(data, axis=0)
         std = np.std(data, axis=0)
         normalized_data = (data - mean)/std
-        return Tensor(normalized_data)
+        return Tensor(normalized_data), mean, std
     
     @staticmethod
-    def denormalize(data:Tensor)->Tensor:
-        mean_ = mean(data, axis=0)
-        std_ = std(data, axis=0)
-        return (data * std_) + mean_
+    def denormalize(data:Tensor, mean_, std_)->Tensor:
+        if data.shape[-1] == len(mean_):
+            return data * std_ + mean_
+        else:
+            skip_steps = len(mean_) // data.shape[-1]
+            return data * std_[::skip_steps] + mean_[::skip_steps]
     
     def _prepare_inputs_and_labels(self) -> Tuple[Tensor, Tensor]:
         inputs, labels = [], []
@@ -185,15 +251,15 @@ class FVMNDataset(Dataset):
             labels.append(self._calculate_difference(time))
         inputs = np.concatenate(inputs, axis=0)
         labels = np.concatenate(labels, axis=0)
-        normalized_inputs = self.normalize(inputs)
-        normalized_labels = self.normalize(labels)
+        normalized_inputs,*_ = self.normalize(inputs)
+        normalized_labels,*_ = self.normalize(labels)
 
         #TODO: hardcoded because this is what done in the original paper. Try to find a better way.
         final_input = np.concatenate((normalized_inputs,inputs[:, 0:1], inputs[:, 5:6], inputs[:, 10:11]), axis=1)
         # looking into the original code, it doesn't seem necessary to concatenate the original data with the normalized data.
 
         return Tensor(normalized_inputs), Tensor(normalized_labels)
-        
+    
     def __len__(self):
         return self.inputs.shape[0]
     

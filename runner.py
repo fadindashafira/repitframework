@@ -13,23 +13,27 @@ Step 7: And REPEAT the process until the timestamp 20.0 is reached.
 from typing import Tuple, List
 from pathlib import Path
 import timeit
-from tqdm import tqdm
+from copy import deepcopy
 
 import torch
 import numpy as np
 from torch.utils.data import DataLoader, Subset, Dataset
 from sklearn.model_selection import train_test_split
+from tqdm import tqdm
 
 from repitframework.Dataset.fvmn import FVMNDataset
 from repitframework.Models.FVMN.fvmn import FVMNetwork
-from repitframework.config import TrainingConfig, OpenfoamConfig
+from repitframework.config import TrainingConfig, OpenfoamConfig, BaseConfig
 from repitframework.OpenFOAM.utils import OpenfoamUtils
 from repitframework.Metrics.ResidualNaturalConvection import residual_mass, residual_momentum, residual_heat
+from repitframework.Metrics.MetricsLogger import MetricsLogger
 from repitframework.plot_utils import make_animation
 from repitframework.OpenFOAM.numpyToFoam import numpyToFoam
 
 
-def get_dataloader(training_config:TrainingConfig, dataset:Dataset, batch_size=None)->Tuple[DataLoader, DataLoader]:
+def get_dataloader(training_config:TrainingConfig, 
+                   dataset:Dataset, 
+                   batch_size=None)->Tuple[DataLoader, DataLoader]:
     '''
     Get the dataloaders for training and validation.
     '''
@@ -51,8 +55,11 @@ def get_dataloader(training_config:TrainingConfig, dataset:Dataset, batch_size=N
     return train_loader, val_loader
 
 class Trainer:
-    def __init__(self, training_config:TrainingConfig, model:torch.nn.Module, optimizer:torch.optim.Adam, 
-                 loss_fn:torch.nn.MSELoss, model_name:str=None):
+    def __init__(self, training_config:TrainingConfig, 
+                 model:torch.nn.Module, 
+                 optimizer:torch.optim.Adam, 
+                 loss_fn:torch.nn.MSELoss, 
+                 model_name:str=None):
         self.training_config = training_config
         self.device = training_config.device
         self.model = model.to(self.device)
@@ -63,9 +70,11 @@ class Trainer:
         self.best_val_accuracy = 1
 
         # setting variables for residue calculation 
-        self.residual_mass = [self.training_config.residual_threshold]
+        self.residual_mass = list()
         self.residual_momentum = list()
         self.residual_heat = list()
+        self.residual_threshold = training_config.residual_threshold
+        self.relative_residual_mass = float()
 
         self.ux_matrix = torch.zeros((training_config.grid_y, training_config.grid_x))
         self.uy_matrix = torch.zeros((training_config.grid_y, training_config.grid_x))
@@ -78,7 +87,9 @@ class Trainer:
         self.uy_index = self.variables.index("U_y")
         self.t_index = self.variables.index("T")
 
-    def train(self, train_loader:DataLoader, val_loader:DataLoader, epochs) -> bool:
+    def train(self, train_loader:DataLoader, 
+              val_loader:DataLoader, 
+              epochs) -> bool:
         self.model.train()  # Set the model to training mode
         for epoch in tqdm(range(epochs), desc="Epochs", leave=False):
             epoch_loss = list()
@@ -106,6 +117,8 @@ class Trainer:
                 self.best_val_accuracy = val_loss
                 self.save_model(f"best_model.pth")
             self.losses["val"].append(val_loss)
+
+        
         return True
 
     def validate(self, val_loader):
@@ -121,7 +134,9 @@ class Trainer:
         training_config.logger.info(f"Validation Loss: {val_loss:.4f}")
         return val_loss
     
-    def predict(self, prediction_start_time:int|float=None, write_interval:int|float=None, data_path:Path=None):
+    def predict(self, prediction_start_time:int|float=None, 
+                write_interval:int|float=None, 
+                data_path:Path=None):
         """
         Parameters
         ----------
@@ -142,20 +157,30 @@ class Trainer:
         prediction_input = None
         running_time = start_time # Because we saving the prediction data at prepare_input_for_prediction function. But, output is after calling this function.
         with torch.no_grad():
-            while (self.residual_mass[-1] <= training_config.residual_threshold) and (running_time < training_config.prediction_end_time):
+            while (self.relative_residual_mass <= self.residual_threshold) and (running_time <= self.training_config.prediction_end_time):
                 first_prediction = True if running_time == start_time else False
                 prediction_input = self.prepare_input_for_prediction(running_time, data_path, first_prediction, prediction_input)
-                predicted_output = self.model(FVMNDataset.normalize(prediction_input).to(self.device))
-                denormed_output = FVMNDataset.denormalize(predicted_output.cpu())
+                normalized_input,mean, std  = FVMNDataset.normalize(prediction_input)
+                predicted_output:torch.Tensor = self.model(normalized_input.to(self.device))
+                denormed_output = FVMNDataset.denormalize(predicted_output.cpu(), mean, std)
                 prediction_input = prediction_input[:, ::5] + denormed_output
-                running_time += time_step
-
+                running_time = round(running_time+time_step, self.training_config.round_to)
+                
             # Because prepare_input_for_prediction function calculates the residual values.
             # Hence, even if the residue value exceeds the threshold, the running time will be updated.
             # So, we need to step down the running time by the write interval outside the loop.
-            running_time -= self.training_config.write_interval
-        return round(running_time, 2)
+        return round(running_time-time_step, self.training_config.round_to)
     
+    def transfer_learning(self, start_time:int|float, 
+                          end_time:int|float, 
+                          write_interval:int|float):
+        '''
+        The first part of the training in the RePIT framework is done for 5000 epochs.
+        Which takes, 1.5 hrs to train even on GPU--A100. 
+        So, the best model is saved and we load the model for transfer learning.
+        '''
+
+
     def save_model(self, model_name:str) -> Path:
         '''
         Parameters
@@ -185,29 +210,39 @@ class Trainer:
         self.training_config.logger.info(f"Model loaded from {path}")
         return self.model
     
-    def get_boundary_data(self, time_step, data_path:Path=None, first_prediction:bool=False) -> List[np.ndarray]:
+    def get_ground_truth_data(self, time_step:int|float, 
+                              data_path:Path=None, 
+                              first_prediction:bool=False) -> List[np.ndarray]:
         '''
         Because in FVMN, we are only predicting the interior points, we need to add the boundary data to the model output.
-        So, that we can again extract the features as we did for the training data and normalize it and again give it as input to the model.
+        Also, we need to calculate the residue. Hence, we need the true data for the time step.
 
         Args
         ---- 
-        model_output_data: torch.Tensor: 
-            The output from the model after denormalizing and adding with the input.
         data_path: Path: 
             If we predict for time step 5.03 then we need the original data for the 
             time step 5.03 to get the boundary data.This is the path to that data.
         time_step: float: 
             The time step for which we are predicting. e.g., 5.03
-        first_prediction: bool: 
+        first_prediction: bool: # TODO: This is not used. Remove it.
             If this is the first prediction, we return the whole data. 
             Else, we set the all the other except boundary to zero.
 
         Returns
         -------
-        List[np.ndarray]: 
-            Each numpy array is the data for each variable separated dimension wise:
-            e.g., [U_x, U_y, T] for each variable.
+        Each numpy array is the data for each variable separated dimension wise:
+        e.g., [U_x, U_y, T] for each variable.
+        
+        ground_truth_data: List[np.ndarray]:
+            Along with boundary values, we send the true values also.
+
+        Functionality
+        -------------
+        1. Get the boundary data for the time step from ground truth data.
+        2. Parse the numpy data for the variables.
+        3. Separate the dimensions of the data if present. 
+        5. Because to calculate the residue, we need true values also. 
+           Hence, this method returns true values also. 
         '''
         data_path = data_path if data_path else self.training_config.assets_path
         variables = self.training_config.extend_variables()
@@ -220,14 +255,12 @@ class Trainer:
                     temp.append(data[:,:, i])
             else:
                 temp.append(data)
-        
-        if not first_prediction:
-            # Set all the values to zero except the boundary values
-            for i in range(len(temp)):
-                temp[i][1:-1, 1:-1] = 0
         return temp
         
-    def prepare_input_for_prediction(self, time_step, data_path:Path, first_prediction:bool,data:torch.Tensor=None) -> torch.Tensor:
+    def prepare_input_for_prediction(self, time_step:int|float, 
+                                     data_path:Path, 
+                                     first_prediction:bool,
+                                     data:torch.Tensor=None) -> torch.Tensor:
         '''
         Prepare the input for the model for prediction. This will include the boundary data as well.
 
@@ -267,20 +300,32 @@ class Trainer:
         Hence, we must do the post-processing before calculating the residue. So, for me, 
         it made a lot of sense to assign the values here. If you have a better idea, please let me know.
         '''
-        # reshape the data to the 2D grid:
-        temp = self.get_boundary_data(time_step, data_path, first_prediction)
+        ground_truth = self.get_ground_truth_data(time_step, data_path, first_prediction)
+        temp = deepcopy(ground_truth)
 
         if not first_prediction:
+
+            # Modelling predicted data: adding zero padding to the predicted data.
             data = data.numpy()
             predicted_data_grid_x = self.training_config.grid_x - 2
             predicted_data_grid_y = self.training_config.grid_y - 2
             assert data.shape[0] == predicted_data_grid_x * predicted_data_grid_y, f"Shape of the data is {data.shape} but should be {(predicted_data_grid_x * predicted_data_grid_y, data.shape[-1])}"
             data = [data[:, i].reshape(self.training_config.grid_y-2, self.training_config.grid_x-2) for i in range(data.shape[-1])]
+
+            # Copying just the boundary values from the ground truth data:
+            for i in range(len(temp)): temp[i][1:-1, 1:-1] = 0 # Setting the internal nodes to zero.
             data = [np.pad(data[i], 1, mode="constant",constant_values=0) for i in range(len(data))]
+
+            # Adding the zero padded predicted data to the zeroed internal nodes in the ground truth data.
             temp = [np.add(t,d) for t,d in zip(temp, data)]
+
+            # Now, we completely have the predicted data in the temp variable.
             self.ux_matrix = temp[self.ux_index]
             self.uy_matrix = temp[self.uy_index]
             self.t_matrix = temp[self.t_index]
+
+            ux_matrix_true = ground_truth[self.ux_index]
+            uy_matrix_true = ground_truth[self.uy_index]
             # for i, var in enumerate(temp):
 
             #     # TODO: just to test the framework, we are hardcoding it for now. To concatenate vectors into a single matrix. 
@@ -289,18 +334,35 @@ class Trainer:
             #     np.save(data_path / f"{self.variables[i]}_{time_step}_predicted.npy", var)
             #     self.training_config.logger.info(f"Saved {self.variables[i]}_{time_step}_predicted.npy")
 
-            u_vector = np.concatenate([self.ux_matrix.reshape(-1,1), self.uy_matrix.reshape(-1,1)], axis=1)
+            ##################### Saving the predicted values #####################
+            u_vector = np.concatenate([self.ux_matrix.reshape(-1,1),
+                                       self.uy_matrix.reshape(-1,1)], axis=1)
             t_scalar = self.t_matrix.reshape(-1,1)
             np.save(data_path / f"U_{time_step}_predicted.npy", u_vector)
             np.save(data_path / f"T_{time_step}_predicted.npy", t_scalar)
             self.training_config.logger.info(f"Saved variables at {data_path}")
+            ##################### Saved the predicted values #####################
 
              # Calculate the residue
-            self.residual_mass.append(residual_mass(ux_matrix=self.ux_matrix, uy_matrix=self.uy_matrix))
+            predicted_residual_mass = residual_mass(ux_matrix=self.ux_matrix, uy_matrix=self.uy_matrix)
+            true_residual_mass = residual_mass(ux_matrix=ux_matrix_true, uy_matrix=uy_matrix_true)
+            self.relative_residual_mass = predicted_residual_mass / true_residual_mass
+
+            self.residual_mass.append(predicted_residual_mass)
             self.residual_momentum.append(residual_momentum(ux_matrix=self.ux_matrix, ux_matrix_prev=self.ux_matrix_prev, 
                                                             uy_matrix=self.uy_matrix, t_matrix=self.t_matrix))
             self.residual_heat.append(residual_heat(ux_matrix=self.ux_matrix, uy_matrix=self.uy_matrix,
                                                     t_matrix=self.t_matrix, t_matrix_prev=self.t_matrix_prev))
+            
+            # Update the previous values
+            self.ux_matrix_prev = self.ux_matrix
+            self.t_matrix_prev = self.t_matrix
+
+            # Logging the residue values
+            self.training_config.logger.info(f"Relative Residual Mass: {self.relative_residual_mass}")
+            self.training_config.logger.info(f"Residual Heat: {self.residual_heat[-1]}")
+            self.training_config.logger.info(f"Residual Momentum: {self.residual_momentum[-1]}")
+            self.training_config.logger.info(f"Residual Mass: {self.residual_mass[-1]}")
         else: 
             self.ux_matrix_prev = temp[self.ux_index]
             self.t_matrix_prev = temp[self.t_index]
@@ -308,58 +370,70 @@ class Trainer:
         temp_ = [FVMNDataset.add_feature(data) for data in temp]
         data = np.concatenate(temp_, axis=1)
 
-        return torch.Tensor(data).to(self.device)
+        return torch.Tensor(data)
 
-if __name__ == "__main__":
-    openfoam_config = OpenfoamConfig()
-    training_config = TrainingConfig()
-    openfoam_utils = OpenfoamUtils(openfoam_config)
-
-    start_time = training_config.training_start_time
-    end_time = training_config.training_end_time
-    running_time = start_time
-
-    # Create model instance
-    model = FVMNetwork(training_config)
-
+def main(base_config:BaseConfig, 
+         openfoam_config:OpenfoamConfig, 
+         training_config:TrainingConfig,
+         network:torch.nn.Module=FVMNetwork,
+         dataset:Dataset=FVMNDataset,
+         visualize:bool=False):
+    
+    # Variables:
+    # Training
+    training_start_time = training_config.training_start_time
+    training_end_time = training_config.training_end_time
+    running_time = training_start_time
     training_loss = list()
     validation_loss = list()
+    optimizer = training_config.optimizer
+    loss_fn = training_config.loss
+
+    # Metrices:
     heat_residue = list()
     momentum_residue = list()
     mass_residue = list()
 
+    # Create model instance
+    model = network(training_config)
+    openfoam_utils = OpenfoamUtils(openfoam_config)
+
+    ##################### RePIT: START #####################
     framework_start_time = timeit.default_timer()
     training_config.logger.info(f"Framework started at {framework_start_time}")
-
     while running_time < training_config.prediction_end_time:
         print("Running time: ", running_time)
         # Run CFD first:
-        is_time_update = openfoam_utils.update_time_foamDictionary(openfoam_config=openfoam_config, 
-                                                                   start_time=start_time, 
-                                                                   end_time=end_time)
-        is_solver_run = openfoam_utils.run_solver(start_time=start_time, end_time=end_time, save_to_numpy=True)
+        is_solver_run = openfoam_utils.run_solver(start_time=training_start_time, 
+                                                  end_time=training_end_time, 
+                                                  save_to_numpy=True)
 
         # Create dataset instance
-        dataset = FVMNDataset(training_config=training_config, start_time=start_time, end_time=end_time, time_step=0.01)
+        dataset = FVMNDataset(training_config=training_config, 
+                              start_time=training_start_time, 
+                              end_time=training_end_time, 
+                              time_step=training_config.write_interval)
         train_loader, val_loader = get_dataloader(training_config, dataset)
 
         # Create trainer instance
-        trainer = Trainer(training_config, model, torch.optim.Adam, torch.nn.MSELoss())
+        trainer = Trainer(training_config=training_config, model=model, optimizer=optimizer, loss_fn=loss_fn)
 
         # Train the model
         trainer.train(train_loader, val_loader, training_config.epochs)
 
-        running_time = trainer.predict(prediction_start_time=end_time, write_interval=0.01)
+        # Before prediction, load the best model: because we are using the same instance of self.model for prediction, hence last trained parameters will be used.
+        model = trainer.load_model("best_model.pth")
+        running_time = trainer.predict(prediction_start_time=training_end_time, 
+                                       write_interval=training_config.write_interval)
 
         # Convert predicted numpy to foam
         is_numpy_to_foam = numpyToFoam(openfoam_config=openfoam_config, 
                                        latestML_time=float(running_time), 
-                                       latestCFD_time=end_time)
+                                       latestCFD_time=training_end_time)
 
         # Transfer learning
-        start_time = running_time
-        end_time = round(start_time + 2*training_config.write_interval,2)
-        model = trainer.load_model("best_model.pth")
+        training_start_time = running_time
+        training_end_time = round(training_start_time + 2*training_config.write_interval,2)
         training_config.epochs = 20
 
         training_loss.extend(trainer.losses["train"])
@@ -376,3 +450,12 @@ if __name__ == "__main__":
     np.save(training_config.model_dir / "heat_residue.npy", heat_residue)
     np.save(training_config.model_dir / "momentum_residue.npy", momentum_residue)
     np.save(training_config.model_dir / "mass_residue.npy", mass_residue)
+
+
+if __name__ == "__main__":
+    openfoam_config = OpenfoamConfig()
+    training_config = TrainingConfig()
+    base_config = BaseConfig()
+
+    # Run the main function
+    main(base_config, openfoam_config, training_config)
