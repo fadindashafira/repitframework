@@ -1,10 +1,13 @@
 from pathlib import Path
-import matplotlib.pyplot as plt
-import numpy as np
-from repitframework.config import BaseConfig
 import warnings
 import imageio
 from typing import Dict
+import json
+
+import matplotlib.pyplot as plt
+import numpy as np
+
+from repitframework.config import BaseConfig
 
 warning_string = '''\n
 Data dimension mismatch: 
@@ -21,7 +24,7 @@ def flip_and_reshape(data:np.ndarray,nx:int,ny:int) -> np.ndarray:
 	Order="C" is used because OpenFOAM stores the data in row-major order.
 	We are flipping the data because numpy writes the data in the first row first which is different from OpenFOAM.
 	'''
-	return np.flipud(data.reshape(ny,nx,order="C"))
+	return np.flipud(data.reshape(ny,nx,order="F"))
 
 def process_variable(data_dict:Dict[str, np.ndarray], 
 					 var:str, data_dim:int, nx:int, ny:int) -> Dict[str, np.ndarray]:
@@ -176,19 +179,22 @@ def make_animation(base_config:BaseConfig,
 											data_vars=data_vars,
 											mode="rgb_array",
 											is_ground_truth=is_ground_truth))
-	imageio.mimsave(save_path, images_list, fps=set_fps)
+	imageio.mimsave(save_path, images_list, fps=set_fps, loop=0)
 	return True
 
 if __name__ == "__main__":
 
 	base_config = BaseConfig()
-	time_list = [round(i,2) for i in np.arange(10.0,20.0,0.01)]
-	# make_animation(base_config=base_config,
-	# 				timestamps=time_list,
-	# 				is_ground_truth=True,
-	# 				set_fps=20,
-	# 				save_name="full_simulation")
-	visualize_output(base_config=base_config,
-					timestamp=10.04,
-					is_ground_truth=False,
-					save_name="predicted_output")
+	# time_list = [round(i,2) for i in np.arange(10.0,20.0,0.01)]
+	with open("/home/shilaj/repitframework/repitframework/ModelDump/natural_convection/prediction_metrics.json","r") as f:
+		metrics = json.load(f)
+	time_list = metrics["Running Time"]
+	make_animation(base_config=base_config,
+					timestamps=time_list,
+					is_ground_truth=True,
+					set_fps=50,
+					save_name="full_simulation")
+	# visualize_output(base_config=base_config,
+	# 				timestamp=10.04,
+	# 				is_ground_truth=False,
+	# 				save_name="output_framework")

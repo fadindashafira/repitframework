@@ -14,6 +14,7 @@ from typing import Tuple, List
 from pathlib import Path
 import timeit
 from copy import deepcopy
+import json
 
 import torch
 import numpy as np
@@ -26,7 +27,6 @@ from repitframework.Models.FVMN.fvmn import FVMNetwork
 from repitframework.config import TrainingConfig, OpenfoamConfig, BaseConfig
 from repitframework.OpenFOAM.utils import OpenfoamUtils
 from repitframework.Metrics.ResidualNaturalConvection import residual_mass, residual_momentum, residual_heat
-from repitframework.Metrics.MetricsLogger import MetricsLogger
 from repitframework.plot_utils import make_animation
 from repitframework.OpenFOAM.numpyToFoam import numpyToFoam
 
@@ -49,8 +49,8 @@ def get_dataloader(training_config:TrainingConfig,
     val_dataset = Subset(dataset, val_indices)
 
     # Dataloaders
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,drop_last=True)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
 
     return train_loader, val_loader
 
@@ -62,17 +62,18 @@ class Trainer:
                  model_name:str=None):
         self.training_config = training_config
         self.device = training_config.device
-        self.model = model.to(self.device)
-        self.model = self.model if model_name is None else self.load_model(model_name)
+        self.model = model
+        self.load_model(model_name) if model_name else None
+        self.model.to(self.device)
         self.optimizer = optimizer(self.model.parameters(), lr=training_config.learning_rate)
         self.loss_fn = loss_fn
-        self.losses = {"train": [], "val": []}
+        # self.losses = {"train": [], "val": []}
         self.best_val_accuracy = 1
 
         # setting variables for residue calculation 
-        self.residual_mass = list()
-        self.residual_momentum = list()
-        self.residual_heat = list()
+        # self.residual_mass = list()
+        # self.residual_momentum = list()
+        # self.residual_heat = list()
         self.residual_threshold = training_config.residual_threshold
         self.relative_residual_mass = float()
 
@@ -92,45 +93,77 @@ class Trainer:
               epochs) -> bool:
         self.model.train()  # Set the model to training mode
         for epoch in tqdm(range(epochs), desc="Epochs", leave=False):
-            epoch_loss = list()
-            for x, y in train_loader:
-                x, y = x.to(self.device), y.to(self.device)
+            train_loss = 0.0
+            for x_batch, y_batch in train_loader:
+                x_batch = x_batch.to(self.device) 
+                y_batch = y_batch.to(self.device)
 
-                # Forward pass
-                predictions = self.model(x)
-                loss = self.loss_fn(predictions, y)
+                # Labels: 
+                y_T = y_batch[:,self.t_index:self.t_index+1]
+                y_ux = y_batch[:, self.ux_index:self.ux_index+1]
+                y_uy = y_batch[:, self.uy_index:self.uy_index+1]
+
+                # Forward pass: Hard coded
+                predictions = self.model(x_batch)
+                pred_T = predictions["T"]
+                pred_ux = predictions["U_x"]
+                pred_uy = predictions["U_y"]
+
+                loss_T = self.loss_fn(pred_T, y_T)
+                loss_ux = self.loss_fn(pred_ux, y_ux)
+                loss_uy = self.loss_fn(pred_uy, y_uy)
+                loss = loss_T + loss_ux + loss_uy
 
                 # Backpropagation
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
 
-                epoch_loss.append(loss.item())
+                train_loss += loss.item()*x_batch.size(0)
             
-            epoch_loss = np.mean(epoch_loss)
-            self.losses["train"].append(epoch_loss)
-            training_config.logger.info(f"Epoch {epoch + 1}, Loss: {epoch_loss:.4f}")
+            train_loss /= len(train_loader.dataset)
+
+            self.training_config.log_metrics(key="Epoch", value=epoch+1, metrics_type="training")
+            self.training_config.log_metrics(key="Training Loss", value=train_loss, metrics_type="training")
+            training_config.logger.info(f"Epoch {epoch + 1}, Loss: {train_loss:.4f}")
 
             # Validation loss
             val_loss = self.validate(val_loader)
             if val_loss < self.best_val_accuracy:
                 self.best_val_accuracy = val_loss
                 self.save_model(f"best_model.pth")
-            self.losses["val"].append(val_loss)
+            self.training_config.log_metrics(key="Validation Loss", value=val_loss, metrics_type="training")
 
         
         return True
 
-    def validate(self, val_loader):
+    def validate(self, val_loader:DataLoader):
         self.model.eval()  # Set the model to evaluation mode
-        val_loss = list()
+        val_loss = 0.0
         with torch.no_grad():
-            for x, y in val_loader:
-                x, y = x.to(self.device), y.to(self.device)
-                predictions = self.model(x)
-                val_loss.append(self.loss_fn(predictions, y).item())
+            for x_val, y_val in val_loader:
+                x_val = x_val.to(self.device) 
+                y_val = y_val.to(self.device)
+
+                # Labels: 
+                y_T = y_val[:,self.t_index:self.t_index+1]
+                y_ux = y_val[:, self.ux_index:self.ux_index+1]
+                y_uy = y_val[:, self.uy_index:self.uy_index+1]
+
+                # Forward pass: Hard coded
+                predictions = self.model(x_val)
+                pred_T = predictions["T"]
+                pred_ux = predictions["U_x"]
+                pred_uy = predictions["U_y"]
+
+                loss_T = self.loss_fn(pred_T, y_T)
+                loss_ux = self.loss_fn(pred_ux, y_ux)
+                loss_uy = self.loss_fn(pred_uy, y_uy)
+                loss = loss_T + loss_ux + loss_uy
+
+                val_loss += loss.item() * x_val.size(0)
         
-        val_loss = np.mean(val_loss)
+        val_loss /= len(val_loader.dataset)
         training_config.logger.info(f"Validation Loss: {val_loss:.4f}")
         return val_loss
     
@@ -149,6 +182,8 @@ class Trainer:
         data_path: Path:
             The path to the data directory.
         """
+
+
         start_time = prediction_start_time if prediction_start_time else self.training_config.prediction_start_time
         time_step = write_interval if write_interval else self.training_config.write_interval
         data_path = Path(data_path) if data_path else self.training_config.assets_path 
@@ -160,9 +195,17 @@ class Trainer:
             while (self.relative_residual_mass <= self.residual_threshold) and (running_time <= self.training_config.prediction_end_time):
                 first_prediction = True if running_time == start_time else False
                 prediction_input = self.prepare_input_for_prediction(running_time, data_path, first_prediction, prediction_input)
-                normalized_input,mean, std  = FVMNDataset.normalize(prediction_input)
+                normalized_input,*_  = FVMNDataset.normalize(prediction_input)
                 predicted_output:torch.Tensor = self.model(normalized_input.to(self.device))
-                denormed_output = FVMNDataset.denormalize(predicted_output.cpu(), mean, std)
+                predicted_output_concat = torch.cat([output.cpu() for output in predicted_output.values()], dim=1)
+
+                # Load the mean and std from the training data: 
+                metrics_path = self.training_config.model_dir / "denorm_metrics.json"
+                with open(metrics_path, "r") as f:
+                    metrics = json.load(f)
+                mean = np.array(metrics["label_MEAN"])
+                std = np.array(metrics["label_STD"])
+                denormed_output = FVMNDataset.denormalize(predicted_output_concat, mean, std)
                 prediction_input = prediction_input[:, ::5] + denormed_output
                 running_time = round(running_time+time_step, self.training_config.round_to)
                 
@@ -206,7 +249,10 @@ class Trainer:
         Epochs= 20
         """
         path = Path.joinpath(self.training_config.model_dir, model_name)
-        self.model.load_state_dict(torch.load(path, weights_only=True))
+        model_weights = torch.load(path, weights_only=True)
+        if model_name == "pt_checkpoint.pth":
+            model_weights = model_weights["model_state_dict"]
+        self.model.load_state_dict(model_weights)
         self.training_config.logger.info(f"Model loaded from {path}")
         return self.model
     
@@ -251,7 +297,7 @@ class Trainer:
         temp = list()
         for data in numpy_data:
             if len(data.shape) > 2:
-                for i in range(2):
+                for i in range(self.training_config.data_dim):
                     temp.append(data[:,:, i])
             else:
                 temp.append(data)
@@ -262,7 +308,7 @@ class Trainer:
                                      first_prediction:bool,
                                      data:torch.Tensor=None) -> torch.Tensor:
         '''
-        Prepare the input for the model for prediction. This will include the boundary data as well.
+        Adds ground truth boundary data to the predicted data and returns the feature selected input for the model.
 
         Args
         ----
@@ -305,12 +351,12 @@ class Trainer:
 
         if not first_prediction:
 
-            # Modelling predicted data: adding zero padding to the predicted data.
+            # Modeling predicted data: adding zero padding to the predicted data.
             data = data.numpy()
             predicted_data_grid_x = self.training_config.grid_x - 2
             predicted_data_grid_y = self.training_config.grid_y - 2
             assert data.shape[0] == predicted_data_grid_x * predicted_data_grid_y, f"Shape of the data is {data.shape} but should be {(predicted_data_grid_x * predicted_data_grid_y, data.shape[-1])}"
-            data = [data[:, i].reshape(self.training_config.grid_y-2, self.training_config.grid_x-2) for i in range(data.shape[-1])]
+            data = [data[:, i].reshape(self.training_config.grid_y-2, self.training_config.grid_x-2,order="F") for i in range(data.shape[-1])]
 
             # Copying just the boundary values from the ground truth data:
             for i in range(len(temp)): temp[i][1:-1, 1:-1] = 0 # Setting the internal nodes to zero.
@@ -326,18 +372,11 @@ class Trainer:
 
             ux_matrix_true = ground_truth[self.ux_index]
             uy_matrix_true = ground_truth[self.uy_index]
-            # for i, var in enumerate(temp):
-
-            #     # TODO: just to test the framework, we are hardcoding it for now. To concatenate vectors into a single matrix. 
-            #     # While saving it to the numpy file, we have to concatenate the vectors into a single matrix, because it will be harder to 
-            #     # change to foam format then. 
-            #     np.save(data_path / f"{self.variables[i]}_{time_step}_predicted.npy", var)
-            #     self.training_config.logger.info(f"Saved {self.variables[i]}_{time_step}_predicted.npy")
 
             ##################### Saving the predicted values #####################
-            u_vector = np.concatenate([self.ux_matrix.reshape(-1,1),
-                                       self.uy_matrix.reshape(-1,1)], axis=1)
-            t_scalar = self.t_matrix.reshape(-1,1)
+            u_vector = np.concatenate([self.ux_matrix.reshape(-1,1, order="F"),
+                                       self.uy_matrix.reshape(-1,1, order="F")], axis=1)
+            t_scalar = self.t_matrix.reshape(-1,1, order="F")
             np.save(data_path / f"U_{time_step}_predicted.npy", u_vector)
             np.save(data_path / f"T_{time_step}_predicted.npy", t_scalar)
             self.training_config.logger.info(f"Saved variables at {data_path}")
@@ -348,21 +387,21 @@ class Trainer:
             true_residual_mass = residual_mass(ux_matrix=ux_matrix_true, uy_matrix=uy_matrix_true)
             self.relative_residual_mass = predicted_residual_mass / true_residual_mass
 
-            self.residual_mass.append(predicted_residual_mass)
-            self.residual_momentum.append(residual_momentum(ux_matrix=self.ux_matrix, ux_matrix_prev=self.ux_matrix_prev, 
-                                                            uy_matrix=self.uy_matrix, t_matrix=self.t_matrix))
-            self.residual_heat.append(residual_heat(ux_matrix=self.ux_matrix, uy_matrix=self.uy_matrix,
-                                                    t_matrix=self.t_matrix, t_matrix_prev=self.t_matrix_prev))
+            predicted_residual_momentum = residual_momentum(ux_matrix=self.ux_matrix, ux_matrix_prev=self.ux_matrix_prev,
+                                                            uy_matrix=self.uy_matrix, t_matrix=self.t_matrix)
+            predicted_residual_heat = residual_heat(ux_matrix=self.ux_matrix, uy_matrix=self.uy_matrix,
+                                                    t_matrix=self.t_matrix, t_matrix_prev=self.t_matrix_prev)
+            
+            self.training_config.log_metrics(key="Running Time", value=time_step)
+            self.training_config.log_metrics(key="Predicted Residual Mass", value=predicted_residual_mass)
+            self.training_config.log_metrics(key="True Residual Mass", value=true_residual_mass)
+            self.training_config.log_metrics(key="Predicted Residual Momentum", value=predicted_residual_momentum)
+            self.training_config.log_metrics(key="Predicted Residual Heat", value=predicted_residual_heat)
+            self.training_config.log_metrics(key="Relative Residual Mass", value=self.relative_residual_mass)
             
             # Update the previous values
             self.ux_matrix_prev = self.ux_matrix
             self.t_matrix_prev = self.t_matrix
-
-            # Logging the residue values
-            self.training_config.logger.info(f"Relative Residual Mass: {self.relative_residual_mass}")
-            self.training_config.logger.info(f"Residual Heat: {self.residual_heat[-1]}")
-            self.training_config.logger.info(f"Residual Momentum: {self.residual_momentum[-1]}")
-            self.training_config.logger.info(f"Residual Mass: {self.residual_mass[-1]}")
         else: 
             self.ux_matrix_prev = temp[self.ux_index]
             self.t_matrix_prev = temp[self.t_index]
@@ -384,18 +423,12 @@ def main(base_config:BaseConfig,
     training_start_time = training_config.training_start_time
     training_end_time = training_config.training_end_time
     running_time = training_start_time
-    training_loss = list()
-    validation_loss = list()
     optimizer = training_config.optimizer
     loss_fn = training_config.loss
 
-    # Metrices:
-    heat_residue = list()
-    momentum_residue = list()
-    mass_residue = list()
-
     # Create model instance
     model = network(training_config)
+    # model = network()
     openfoam_utils = OpenfoamUtils(openfoam_config)
 
     ##################### RePIT: START #####################
@@ -406,7 +439,7 @@ def main(base_config:BaseConfig,
         # Run CFD first:
         is_solver_run = openfoam_utils.run_solver(start_time=training_start_time, 
                                                   end_time=training_end_time, 
-                                                  save_to_numpy=True)
+                                                  save_to_numpy=False)
 
         # Create dataset instance
         dataset = FVMNDataset(training_config=training_config, 
@@ -436,20 +469,8 @@ def main(base_config:BaseConfig,
         training_end_time = round(training_start_time + 2*training_config.write_interval,2)
         training_config.epochs = 20
 
-        training_loss.extend(trainer.losses["train"])
-        validation_loss.extend(trainer.losses["val"])
-        heat_residue.extend(trainer.residual_heat)
-        momentum_residue.extend(trainer.residual_momentum)
-        mass_residue.extend(trainer.residual_mass)
-
     framework_end_time = timeit.default_timer()
     training_config.logger.info(f"Framework ended at {framework_end_time}")
-    # Save the losses and residues
-    np.save(training_config.model_dir / "training_loss.npy", training_loss)
-    np.save(training_config.model_dir / "validation_loss.npy", validation_loss)
-    np.save(training_config.model_dir / "heat_residue.npy", heat_residue)
-    np.save(training_config.model_dir / "momentum_residue.npy", momentum_residue)
-    np.save(training_config.model_dir / "mass_residue.npy", mass_residue)
 
 
 if __name__ == "__main__":
@@ -459,3 +480,10 @@ if __name__ == "__main__":
 
     # Run the main function
     main(base_config, openfoam_config, training_config)
+    # Start Prediction
+    # trainer = Trainer(training_config=training_config,
+    #                   model=FVMNetwork(training_config=training_config),
+    #                   optimizer=training_config.optimizer,
+    #                   loss_fn=training_config.loss,
+    #                   model_name="best_model.pth")
+    # trainer.predict(prediction_start_time=10.02, write_interval=0.01)

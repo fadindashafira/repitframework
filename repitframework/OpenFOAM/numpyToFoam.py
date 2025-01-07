@@ -5,6 +5,7 @@ import re
 import numpy as np
 
 from repitframework.config import OpenfoamConfig
+from .utils import OpenfoamUtils
 
 def parse_numpy(data: np.ndarray) -> str:
 	"""
@@ -95,21 +96,20 @@ def numpyToFoam(openfoam_config:OpenfoamConfig,
 	assets_path = Path(assets_path) if assets_path else openfoam_config.assets_path
 	variables = variables if variables else openfoam_config.extend_variables()
 
-	if not latestCFD_time:
-		command_to_list_time_directories = ["foamListTimes", "-case", solver_dir]
-		command_result = subprocess.run(command_to_list_time_directories,capture_output=True ,text=True, check=True)
-		time_list = command_result.stdout.split("\n")
-		time_list = [round(time,openfoam_config.round_to) for time in time_list if time.strip()]
-		latestCFD_time = max(time_list)
+	if not latestCFD_time: 
+		latestCFD_time = OpenfoamUtils.max_time_directory(solver_dir, round_to=openfoam_config.round_to)
+	else:
+		latestCFD_time = int(latestCFD_time) if latestCFD_time.is_integer() else latestCFD_time
 
 	latestCFD_time_dir = Path.joinpath(solver_dir,f"{latestCFD_time}") # time directory for current time
 
 	# Because, in openfoam if the time directory is float at the terminal values like; 11.0, 12.0, 13.0 are converted to 11, 12, 13.
-	ml_dir_time_name = str(latestML_time).split(".")[-1]
-	ml_dir_time_name = int(latestML_time) if int(ml_dir_time_name) == 0 else latestML_time
+	ml_dir_time_name = int(latestML_time) if latestML_time.is_integer() else latestML_time
 	latestML_time_dir  = Path.joinpath(solver_dir, f"{ml_dir_time_name}") # time directory for next time (latestCFD_time + 1)
 
-	subprocess.run(["cp", "-r", latestCFD_time_dir, latestML_time_dir], check=True)    # copy the contents of latest CFD simulation time to the latest ML simulation time.
+	# copy the contents of latest CFD simulation time to the latest ML simulation time.
+	if not latestML_time_dir.exists(): subprocess.run(["cp", "-r", latestCFD_time_dir, latestML_time_dir], check=True)
+
 	for variable in variables:
 		numpy_file_name = f"{variable}_{latestML_time}.npy" if is_ground_truth else f"{variable}_{latestML_time}_predicted.npy"
 		openfoam_var_path = Path.joinpath(latestML_time_dir, f"{variable}") # openfoam variable path: where we write the numpy data    
@@ -130,4 +130,4 @@ def numpyToFoam(openfoam_config:OpenfoamConfig,
 	
 if __name__ == "__main__":
 	openfoam_config = OpenfoamConfig()
-	numpyToFoam(openfoam_config, latestCFD_time=9, latestML_time=10.0, is_ground_truth=True)
+	numpyToFoam(openfoam_config, latestCFD_time=10.0, latestML_time=20.0, is_ground_truth=True)

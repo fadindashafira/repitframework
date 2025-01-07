@@ -2,6 +2,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 import logging
+import json
+from collections import defaultdict
 
 
 import torch.cuda as cuda
@@ -14,7 +16,7 @@ class BaseConfig:
 	dataloader_dir:Path = Path(root_dir, "DataLoader")
 	logs_dir:Path = Path(root_dir, "logs")
 	metrics_dir:Path = Path(root_dir, "Metrics")
-	modelselector_dir:Path = Path(root_dir, "Models")
+	model_selector_dir:Path = Path(root_dir, "Models")
 	openfoam_dir:Path = Path(root_dir, "OpenFOAM")
 	solver_dir:Path = Path(root_dir, "Solvers","natural_convection")
 
@@ -29,7 +31,7 @@ class BaseConfig:
 	logger_level = logging.DEBUG
 
 	# Data parameters: Remember, if you calculating the residual, first vector should be U and last scalar should be T. 
-	data_vars:dict[str] = field(default_factory=lambda: {"vectors":["U"],"scalars":["T"]})
+	data_vars:dict[str] = field(default_factory=lambda: {"scalars":["T"],"vectors":["U"]})
 	data_dim:int = 2 # It is to denote either data is 1D or 2D or 3D.
 	grid_x: int = 200 # Number of grid points in x-direction
 	grid_y: int = 200 # Number of grid points in y-direction
@@ -113,6 +115,7 @@ class BaseConfig:
 		today_date_dir = Path(self.logs_dir, today_date)
 		today_date_dir.mkdir(parents=True, exist_ok=True)
 		log_file = Path(today_date_dir, log_file)
+		
 		# Prevent adding multiple handlers if the logger is already configured
 		if not logger.handlers:
 			logger.setLevel(level)
@@ -157,10 +160,26 @@ class TrainingConfig(BaseConfig):
 		self.training_start_time = 10.0
 		self.training_end_time = 10.02
 		self.prediction_start_time = 10.02
-		self.prediction_end_time = 10.05
+		self.prediction_end_time = 19.99
 
 		self.log_file: Path = Path("Training.log")
 		self.logger = self.setup_logger("TrainingLogger",self.log_file)
+
+	def log_metrics(self, key:str, value:int|float, metrics_type:str="prediction"):
+		logging_path = Path(self.model_dir, f"{metrics_type}_metrics.json")
+
+		data = defaultdict(list)
+		if logging_path.exists():
+			try:
+				with open(logging_path, "r") as f:
+					data.update(json.load(f))
+			except json.JSONDecodeError:
+				pass
+
+		data[key].append(value)	
+		
+		with open(logging_path, "w") as f:
+			json.dump(data, f, indent=4)
 
 if __name__ == "__main__":
 	openfoam_config = OpenfoamConfig()

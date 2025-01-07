@@ -22,7 +22,7 @@ startTime       10;
 
 stopAt          endTime;
 
-endTime         10.03;
+endTime         20;
 
 deltaT          0.1;
 
@@ -34,7 +34,7 @@ purgeWrite      0;
 
 writeFormat     ascii;
 
-writePrecision  6;
+writePrecision  12;
 
 writeCompression off;
 

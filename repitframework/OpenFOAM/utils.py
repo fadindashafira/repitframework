@@ -1,9 +1,10 @@
 from pathlib import Path
 import subprocess
-from tqdm import tqdm
+from datetime import datetime
 
 import Ofpp
 import numpy as np
+from tqdm import tqdm
 
 from repitframework.config import OpenfoamConfig
 
@@ -127,6 +128,7 @@ class OpenfoamUtils:
         1. List the time directories::
 
             foamListTimes -case solver_dir
+
         2. Deleting the time directories::
 
             foamListTimes -case solver_dir -rm -time "1,2,3,4,5"
@@ -199,6 +201,7 @@ class OpenfoamUtils:
         write_interval = write_interval if write_interval else openfoam_config.write_interval
         round_to = len(str(write_interval).split(".")[-1])
         start_time = round(start_time,round_to) if start_time else openfoam_config.start_time
+        
         end_time = round(end_time,round_to) if end_time else openfoam_config.end_time
 
         commands_to_update_time = ["foamDictionary",
@@ -212,10 +215,43 @@ class OpenfoamUtils:
         openfoam_config.logger.debug(f"Time updated successfully: {command_output}")
 
         return True
+    
+    @staticmethod
+    def max_time_directory(solver_dir:Path, round_to:int=2) -> float:
+        '''
+        Get the maximum time directory from the solver directory. This is useful when we want to 
+        know the maximum time directory in the solver directory. 
 
-    def run_solver(self, start_time=None,
-                   end_time=None,
-                   write_interval=None,
+        Args
+        ----
+        solver_dir: Path: 
+            The path to the solver directory.
+        round_to: int:
+            The number of decimal places to round to.
+            (depends on the write_interval)
+
+        Returns
+        -------
+        float: 
+            The maximum time directory in the solver directory.
+        '''
+        command_to_list_time_directories = ["foamListTimes", "-case", solver_dir]
+        command_result = OpenfoamUtils.run_subprocess(command_to_list_time_directories)
+        time_list = command_result.split("\n")
+
+        '''
+        if i.isnumeric() or i.replace(".", "").isnumeric() is to check if the time directory is a number.
+        Because, if the time directories in the solver directory are not continuous, then OpenFOAM gives 
+        an warning. So, the subprocess will capture this warning also. Hence, to avoid this we are implementing
+        this work-around. 
+        '''
+        time_list = [round(float(time),round_to) for time in time_list if time.isnumeric() or time.replace(".", "").isnumeric()]
+        max_time = max(time_list) if time_list else 0
+        return int(max_time) if max_time.is_integer() else max_time
+
+    def run_solver(self, start_time:int|float=None,
+                   end_time:int|float=None,
+                   write_interval:int|float=None,
                    save_to_numpy:bool=False,
                    del_dirs:bool=False) -> bool:
         '''
@@ -271,11 +307,19 @@ class OpenfoamUtils:
         round_to = len(str(write_interval).split(".")[-1])
         start_time = round(start_time,round_to) if start_time else self.openfoam_config.start_time
         end_time = round(end_time,round_to) if end_time else self.openfoam_config.end_time
+        max_time = OpenfoamUtils.max_time_directory(self.solver_dir, round_to=round_to)
+        '''
+        Because if we already have a time directory greater than the time we want to start
+        the simulation, then OpenFOAM doesn't start the simulation. So, to capture this 
+        we throw an error. 
+        '''
+        if start_time < max_time:
+            raise ValueError(f"Max timestamp is {max_time}, illogical to start simulation from {start_time}")
+        
         # Update the time in the controlDict file
         self.update_time_foamDictionary(self.openfoam_config, start_time=start_time,
                                         end_time=end_time, write_interval=write_interval)
         self.openfoam_config.logger.debug(f"Time updated successfully: start_time={start_time}|end_time={end_time}|write_interval={write_interval}")
-
         self.openfoam_config.logger.debug(f"Solver directory: {self.solver_dir}")
 
         # Create the mesh
@@ -287,7 +331,9 @@ class OpenfoamUtils:
         # Run the solver
         command_to_run_solver = [self.solver_type, "-case", self.solver_dir]
         with tqdm(total=1, desc="Running Solver", unit="step") as pbar:
+            self.openfoam_config.logger.debug(f"Solver running from {start_time} to {end_time} started at {datetime.now()}")
             solver_result = self.run_subprocess(command_to_run_solver)
+            self.openfoam_config.logger.debug(f"Solver running from {start_time} to {end_time} ended at {datetime.now()}")
             pbar.update(1)
         self.openfoam_config.logger.debug(f"\n Solver Output: {solver_result}\n")
 
@@ -299,4 +345,4 @@ class OpenfoamUtils:
 if __name__ == "__main__":
     openfoam_config = OpenfoamConfig()
     openfoam_utils = OpenfoamUtils(openfoam_config)
-    openfoam_utils.run_solver(start_time=10.0, end_time=20.0, write_interval=0.01,save_to_numpy=True, del_dirs=True)
+    openfoam_utils.run_solver(start_time=10, end_time=20, write_interval=0.01,save_to_numpy=False, del_dirs=False)

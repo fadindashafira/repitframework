@@ -29,7 +29,7 @@ class FVMNetwork(torch.nn.Module):
         # Create networks dynamically based on vars_list
         self.networks = torch.nn.ModuleDict(
             {
-                f"net_{var}": self._build_network() for var in self.vars
+                f"{var}": self._build_network() for var in self.vars
             }
         )
 
@@ -38,8 +38,9 @@ class FVMNetwork(torch.nn.Module):
         returns output for each variable as a tuple: 
         (ux_hat, uy_hat, t_hat)
         '''
-        outputs = [net(x) for _, net in self.networks.items()]
-        return torch.cat(outputs, dim=1)
+        outputs = {var: net(x) for var, net in self.networks.items()}
+        outputs_concat = torch.cat([output for output in outputs.values()], dim=1)
+        return outputs
 
     def _build_network(self):
         """
@@ -58,4 +59,4 @@ if __name__ == "__main__":
     
     dummy_input = torch.randn(10,15)
     output = model(dummy_input)
-    print(output.shape)
+    print(output["T"].shape)
