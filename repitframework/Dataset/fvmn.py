@@ -45,6 +45,7 @@ class FVMNDataset(Dataset):
         self.vars: list = self.training_config.extend_variables() if not vars_list else vars_list
         self.time_step = self.training_config.write_interval if not time_step else time_step   
 
+        self.time_list = self._generate_intervals()
         self.grid_x = self.training_config.grid_x
         self.grid_y = self.training_config.grid_y
         ############## ------------ Data Integrity Check --------------############
@@ -62,8 +63,9 @@ class FVMNDataset(Dataset):
         self.inputs, self.labels = self._prepare_inputs_and_labels()
 
     def _is_present(self) -> bool:
+        # time_list = np.arange(self.start_time, self.end_time + self.time_step, self.time_step)
         for var in self.vars:
-            for time in np.arange(self.start_time, self.end_time+self.time_step, self.time_step):
+            for time in self.time_list:
                 if not (self.data_path / f"{var}_{round(time, self.training_config.round_to)}.npy").exists():
                     return False
         return True
@@ -198,8 +200,11 @@ class FVMNDataset(Dataset):
                     temp.append(data[:,:,i])
             else:
                 temp.append(data)
-        data = [FVMNDataset.add_feature(data) for data in temp] # In original code: zero padded done but while extracting features, these zero padded regions are not touched. 
-        # grid_number_excluding_bc = (self.grid_x-2) * (self.grid_y - 2) # If you do zero padding, uncomment this line.
+
+        if self.training_config.bc_type != "ground_truth":
+            temp = self.training_config.hard_contraint_bc(temp)
+
+        data = [FVMNDataset.add_feature(data) for data in temp]  
         return np.concatenate(data, axis=1)
 
     def _calculate_difference(self, time) -> np.ndarray:
@@ -252,7 +257,7 @@ class FVMNDataset(Dataset):
     
     def _prepare_inputs_and_labels(self) -> Tuple[Tensor, Tensor]:
         inputs, labels = [], []
-        for time in np.round(np.arange(self.start_time, self.end_time, self.time_step),2):
+        for time in self.time_list[:-1]: # We are excluding the last time step because it is t+1 in _calculate_difference.
             inputs.append(self._prepare_input(time))
             labels.append(self._calculate_difference(time))
         inputs = np.concatenate(inputs, axis=0)
@@ -269,6 +274,14 @@ class FVMNDataset(Dataset):
 
         return Tensor(normalized_inputs), Tensor(normalized_labels)
     
+    def _generate_intervals(self,):
+        time_list = []
+        running_time = self.start_time
+        while running_time <= self.end_time:
+            time_list.append(round(running_time, self.training_config.round_to))
+            running_time += self.time_step
+        return time_list
+    
     def __len__(self):
         return self.inputs.shape[0]
     
@@ -278,8 +291,8 @@ class FVMNDataset(Dataset):
 if __name__ == "__main__":
     training_config = TrainingConfig()
     data_path = training_config.assets_path
-    start_time = 5.0
-    end_time = 5.02
+    start_time = 10.0
+    end_time = 10.02
     time_step = 0.01
     data = FVMNDataset(training_config,data_path, start_time, end_time, time_step)
     inputs , labels = data._prepare_inputs_and_labels()

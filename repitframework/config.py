@@ -4,10 +4,12 @@ from pathlib import Path
 import logging
 import json
 from collections import defaultdict
+from typing import List
 
 
 import torch.cuda as cuda
 import torch
+import numpy as np
 
 @dataclass
 class BaseConfig:
@@ -140,8 +142,8 @@ class OpenfoamConfig(BaseConfig):
 		self.mesh_type:str = "blockMesh"
 		self.solver_type:str = "buoyantFoam"
 		self.logger = self.setup_logger("OpenFOAMLogger",self.log_file)
-		self.start_time = 0
-		self.end_time = 2
+		self.start_time = 10.0
+		self.end_time = 10.02
 		self.start_time = round(self.start_time, self.round_to)
 		self.end_time = round(self.end_time, self.round_to)
 
@@ -160,7 +162,8 @@ class TrainingConfig(BaseConfig):
 		self.training_start_time = 10.0
 		self.training_end_time = 10.02
 		self.prediction_start_time = 10.02
-		self.prediction_end_time = 19.99
+		self.prediction_end_time = 20.0
+		self.bc_type:str = None # either None or "ground_truth"
 
 		self.log_file: Path = Path("Training.log")
 		self.logger = self.setup_logger("TrainingLogger",self.log_file)
@@ -180,6 +183,53 @@ class TrainingConfig(BaseConfig):
 		
 		with open(logging_path, "w") as f:
 			json.dump(data, f, indent=4)
+	
+	def hard_contraint_bc(self, data_list:List):
+		'''
+		We are just encoding the boundary conditions as an extra layer to the predicted values. 
+		Also, while preparing the training data, we need to ensure that the boundary conditions are 
+		imposed the same way.
+		
+		Args
+		----
+		ux_matrix: torch.Tensor
+			shape: (grid_y, grid_x)
+		uy_matrix: torch.Tensor
+			shape: (grid_y, grid_x)
+		t_matrix: torch.Tensor
+			shape: (grid_y, grid_x)
+
+		ux and uy are noSlip conditions, hence they should be zero.
+
+		The BC for temperature: 
+			- Left wall: 288.15
+			- Right wall: 307.75
+			- Top wall: adiabatic
+			- Bottom wall: adiaabatic
+		'''
+		vars_list = self.get_variables()
+		ux_matrix = data_list[vars_list.index("U_x")]
+		uy_matrix = data_list[vars_list.index("U_y")]
+		t_matrix = data_list[vars_list.index("T")]
+
+		ux_matrix = np.pad(ux_matrix, ((1,1),(1,1)), mode="constant", constant_values=0)
+		uy_matrix = np.pad(uy_matrix, ((1,1),(1,1)), mode="constant", constant_values=0)
+		t_matrix = np.pad(t_matrix, ((1,1),(1,1)), mode="constant", constant_values=0)
+
+		right_wall_temperature = 307.75
+		left_wall_temperature = 288.15
+
+		# Applying the boundary conditions
+		t_matrix[:, 0] = left_wall_temperature
+		t_matrix[:, -1] = right_wall_temperature
+		t_matrix[0, :] = t_matrix[1,:]
+		t_matrix[-1, :] = t_matrix[-2,:]
+
+		data_list[vars_list.index("U_x")] = ux_matrix
+		data_list[vars_list.index("U_y")] = uy_matrix
+		data_list[vars_list.index("T")] = t_matrix
+
+		return data_list
 
 if __name__ == "__main__":
 	openfoam_config = OpenfoamConfig()

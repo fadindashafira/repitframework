@@ -185,16 +185,16 @@ def make_animation(base_config:BaseConfig,
 if __name__ == "__main__":
 
 	base_config = BaseConfig()
-	# time_list = [round(i,2) for i in np.arange(10.0,20.0,0.01)]
 	with open("/home/shilaj/repitframework/repitframework/ModelDump/natural_convection/prediction_metrics.json","r") as f:
 		metrics = json.load(f)
 	time_list = metrics["Running Time"]
+	print(len(time_list))
 	make_animation(base_config=base_config,
 					timestamps=time_list,
-					is_ground_truth=True,
-					set_fps=50,
-					save_name="full_simulation")
+					is_ground_truth=False,
+					set_fps=5,
+					save_name="prediction_simulation_test")
 	# visualize_output(base_config=base_config,
 	# 				timestamp=10.04,
 	# 				is_ground_truth=False,
-	# 				save_name="output_framework")
+	# 				save_name="predicted")
