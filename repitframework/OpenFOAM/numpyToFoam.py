@@ -1,48 +1,154 @@
 from pathlib import Path
 import subprocess
 import re
+from copy import deepcopy
 
 import numpy as np
+import Ofpp
 
 from repitframework.config import OpenfoamConfig
 from repitframework.OpenFOAM import OpenfoamUtils
 
-def parse_numpy(data: np.ndarray) -> str:
-	"""
-	Convert a NumPy array to a string representation suitable for OpenFOAM field files.
 
-	Args
-	----------
-	data: np.ndarray: 
-		The NumPy array to convert.
+'''
+To calculate rho: 
+rho = P*W / R*T
+	P: latest CFD time kg/ms2
+	W: 28.96 gm/mol | 0.02896 kg/mol
+	R: 8.31446261815324 J/mol.K
+	T: Predicted field K
 
-	Returns
-	-------
-	parsed_output: str: 
-		The string representation of the data enclosed by parenthesis.
+OR: 
+rho = rho_0 - alpha*rho_0(T-T_0): https://www.simscale.com/docs/simwiki/cfd-computational-fluid-dynamics/what-is-boussinesq-approximation/
+'''
+
+def calculate_rho(pressure_data:np.ndarray, temperature_data: np.ndarray) -> np.ndarray:
+	mol_wt = 0.02896
+	gas_constant = 8.31446261815324
+	temperature_data = temperature_data.reshape(-1)
+
+	rho_idealgas = (pressure_data * mol_wt) / (gas_constant * temperature_data)
+	return rho_idealgas
+
+def calculate_phi(rho_data:np.ndarray, velocity_data:np.ndarray):
+	rho = rho_data.reshape(200,200, order="F")
+	rho_x_faces = 0.5 * (rho[:-1,:] + rho[1:,:])
+	rho_y_faces = 0.5 * (rho[:, :-1] + rho[:,1:])
+
+	U = velocity_data.reshape(200,200,-1, order="F")
+	Ux_faces = 0.5 * (U[:-1,:, 0] + U[1:,:,0])
+	Uy_faces = 0.5 * (U[:,:-1, 1] + U[:,1:,1])
+
+	phi_x_faces = rho_x_faces * Ux_faces * 0.005
+	phi_y_faces = rho_y_faces * Uy_faces * 0.005
+
+	phi_x_faces = phi_x_faces.reshape(-1, order="F")
+	phi_y_faces = phi_y_faces.reshape(-1, order="F")
+
+	return np.concatenate([phi_x_faces, phi_y_faces], axis=0)
+
+def calculate_prgh(pressure_data:np.ndarray, temperature_data:np.ndarray) -> np.ndarray:
+	'''
+	The height is exactly this: 
+	array([[0.005, 0.005, 0.005, ..., 0.005, 0.005, 0.005],
+       [0.01 , 0.01 , 0.01 , ..., 0.01 , 0.01 , 0.01 ],
+       [0.015, 0.015, 0.015, ..., 0.015, 0.015, 0.015],
+       ...,
+       [0.99 , 0.99 , 0.99 , ..., 0.99 , 0.99 , 0.99 ],
+       [0.995, 0.995, 0.995, ..., 0.995, 0.995, 0.995],
+       [1.   , 1.   , 1.   , ..., 1.   , 1.   , 1.   ]])
+	'''
 	
-	Example
-	-------
-		"(1 2 3)\n(4 5 6)\n(7 8 9)"
-	"""
-	if data.ndim == 1:
-		# 1D array of scalars
-		return  '\n'.join(map(str, data))
-	elif data.ndim == 2:
-		if data.shape[1] == 1: # 1D array
-			return '\n'.join(map(str, data[:, 0]))
-		elif data.shape[-1] == 2: # 2D array
-			# For the vector field, OpenFOAM requires the data to be in the form of (x y z) for each row.
-			# So, if we have a 2D array of shape (n, 2), we need to add a column of zeros to make it (n, 3).
-			lines = ['(' + ' '.join(map(str, row)) + ' 0)' for row in data]
-			return '\n'.join(lines)
-		else: # 3D array
-			lines = ['(' + ' '.join(map(str, row)) + ')' for row in data]
-			return '\n'.join(lines)
-	else:
-		raise ValueError("Data shape not supported. Aborting conversion from numpy to OpenFOAM.")
+	gravity = 9.81
+	temperature_data = temperature_data.reshape(-1)
+	temp_avg = np.mean(temperature_data)
+	mol_wt = 0.02896
+	gas_constant = 8.31446261815324
 
-def manage_time_uniform(solver_dir:Path, latestML_time:float) -> str:
+	spatial_range = OpenfoamUtils.generate_intervals(0.005, 200*0.005, 0.005, 3)
+	spatial_range = np.array(spatial_range).reshape(-1,1)
+	height = np.tile(spatial_range, (1,200))
+	
+	pressure_data = pressure_data.reshape(200,200, order='F')
+	temperature_data = temperature_data.reshape(200,200, order='F')
+
+	p_rgh = pressure_data - ((mol_wt * gravity)/(gas_constant * temp_avg))* (pressure_data * height)
+	return p_rgh.reshape(-1, order='F')
+
+def include_all_features_NC(temperature_data:np.ndarray, latestML_time_dir:Path, velocity_data:np.ndarray) -> bool:
+	
+	pressure_path = latestML_time_dir / "p"
+	assert pressure_path, '''You must have "pressure file" -- we are using pressure value from the latest CFD simulation;\n
+	Because they are almost constant all over the simulation, so it does not matter.
+	'''
+	pressure_data = Ofpp.parse_internal_field(pressure_path)
+	rho_data = calculate_rho(pressure_data, temperature_data)
+	p_rgh = calculate_prgh(pressure_data, temperature_data)
+	phi = calculate_phi(rho_data, velocity_data)
+	for file in latestML_time_dir.iterdir():
+		if file == latestML_time_dir / "rho":
+			data_str = "(\n" + parse_numpy(rho_data) + "\n)\n;"
+			with open(file, "r") as f: 
+				foam_data = f.read()
+				foam_data = re.sub(r'\([\s\S]*?\)\n;', f'{data_str}',foam_data,count=1)
+			with open(file, "w") as f: 
+				f.write(foam_data)
+		elif file == latestML_time_dir / "p_rgh":
+			data_str = "(\n" + parse_numpy(p_rgh) + "\n)\n;"
+			with open(file, "r") as f: 
+				foam_data = f.read()
+				foam_data = re.sub(r'\([\s\S]*?\)\n;', f'{data_str}',foam_data,count=1)
+			# with open(file, "w") as f: 
+			# 	f.write(foam_data)
+		elif file == latestML_time_dir / "phi":
+			data_str = "(\n" + parse_numpy(phi) + "\n)\n;"
+			with open(file, "r") as f: 
+				foam_data = f.read()
+				foam_data = re.sub(r'\([\s\S]*?\)\n;', f'{data_str}',foam_data,count=1)
+			# with open(file, "w") as f: 
+			# 	f.write(foam_data)
+
+	return True
+
+def format_number(x):
+	"""Format a number to 12 significant digits without scientific notation."""
+	return f"{x:.17g}"  # Uses 12 significant figures, trims trailing zeros
+
+def parse_numpy(data: np.ndarray) -> str:
+    """
+    Convert a NumPy array to a string representation suitable for OpenFOAM field files with writePrecision of 12.
+    This ensures 12 significant digits while removing unnecessary trailing zeros.
+
+    Args
+    ----
+    data: np.ndarray
+        The NumPy array to convert.
+
+    Returns
+    -------
+    parsed_output: str
+        The string representation of the data enclosed by parentheses.
+    
+    Example
+    -------
+        "(0.000123456789102 1.23456789012 1234567890.12)"
+    """
+    
+    if data.ndim == 1:
+        return '\n'.join(map(format_number, data))
+    elif data.ndim == 2:
+        if data.shape[1] == 1:  # 1D array stored as column vector
+            return '\n'.join(map(format_number, data[:, 0]))
+        elif data.shape[1] == 2:  # 2D array (vector fields, need (x y z))
+            lines = [f"({format_number(x[0])} {format_number(x[1])} 0)" for x in data]
+            return '\n'.join(lines)
+        else:  # 3D array (full vectors)
+            lines = [f"({format_number(x[0])} {format_number(x[1])} {format_number(x[2])})" for x in data]
+            return '\n'.join(lines)
+    else:
+        raise ValueError("Data shape not supported. Aborting conversion from numpy to OpenFOAM.")
+
+def manage_time_uniform(solver_dir:Path, latestML_time:int|float) -> str:
 	'''
 	Changing time folder
 	---------------------
@@ -97,8 +203,12 @@ def manage_time_uniform(solver_dir:Path, latestML_time:float) -> str:
 								 f'"{latestML_time}"',
 								 f"{latestML_time}/uniform/time"]
 	
-	latestML_time_without_decimal = int(str(latestML_time).replace(".",""))
-	if latestML_time.is_integer(): latestML_time_without_decimal = int(f"{latestML_time}00")
+
+	if str(latestML_time).isdigit():
+		latestML_time_without_decimal = int(f"{latestML_time}00")
+	else:
+		latestML_time_without_decimal = int(str(latestML_time).replace(".",""))
+		
 	command_to_change_time_index = ["foamDictionary",
 								 "-case",
 								 solver_dir,
@@ -183,7 +293,7 @@ def numpyToFoam(openfoam_config:OpenfoamConfig,
 	if not latestML_time_dir.exists(): subprocess.run(["cp", "-r", latestCFD_time_dir, latestML_time_dir], check=True)
 
 	output_string = manage_time_uniform(solver_dir, ml_dir_time_name)
-
+	
 	for variable in variables:
 		numpy_file_name = f"{variable}_{latestML_time}.npy" if is_ground_truth else f"{variable}_{latestML_time}_predicted.npy"
 		openfoam_var_path = Path.joinpath(latestML_time_dir, f"{variable}") # openfoam variable path: where we write the numpy data    
@@ -191,12 +301,10 @@ def numpyToFoam(openfoam_config:OpenfoamConfig,
 
 		# numpy file processing:
 		data = np.load(numpy_file_path)
-
-		# if variable == "T":
-		# 	data = np.round(data, 9)
-		# else:
-		# 	data = np.round(data, 18)
-
+		if variable == "T":
+			temperature_data = deepcopy(data)
+		elif variable == "U":
+			velocity_data = deepcopy(data)
 		data_str = "(\n" + parse_numpy(data) + "\n)\n;" # convert numpy data to OpenFOAM format
 		
 		with open(openfoam_var_path, "r") as file:
@@ -206,10 +314,12 @@ def numpyToFoam(openfoam_config:OpenfoamConfig,
 
 		with open(openfoam_var_path, "w") as file:
 			file.write(foam_data)
+	
+	include_all_features_NC(temperature_data, latestML_time_dir, velocity_data)
 	return output_string   
 
 	
 if __name__ == "__main__":
 	openfoam_config = OpenfoamConfig()
-	output_string = numpyToFoam(openfoam_config, latestCFD_time=10.0, latestML_time=10.02, is_ground_truth=True)
+	output_string = numpyToFoam(openfoam_config, latestCFD_time=10.0, latestML_time=10.0, is_ground_truth=True)
 	print(output_string)

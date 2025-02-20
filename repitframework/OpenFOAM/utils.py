@@ -91,11 +91,10 @@ class OpenfoamUtils:
         np.arange gave inconsistent results. So, we are using this method to generate the time intervals.
         '''
         time_list = []
-        time_list.append(round(start_time, round_to))
         running_time = start_time
         while running_time <= end_time:
-            running_time += time_step # To include end_time also in the list. It is kept before append.
             time_list.append(round(running_time, round_to))
+            running_time = round(running_time+time_step, round_to)
         return time_list
 
     @staticmethod
@@ -169,11 +168,6 @@ class OpenfoamUtils:
             for var in variables:
                 try:
                     data = Ofpp.parse_internal_field(Path(time_dir, var))
-                    # if var == "T":
-                    #     data = np.round(data, 9)
-                    # else:
-                    #     data = np.round(data, 18)
-                        
                     openfoam_config.logger.debug(f"Data parsed to numpy:{var}_{float(time_dir.name)} --> {data.shape}")
                     np.save(Path(save_path, f"{var}_{float(time_dir.name)}.npy"), data) # We are saving it in float because we want to keep things consistent.
                 except Exception as e:
@@ -267,7 +261,7 @@ class OpenfoamUtils:
         this work-around. 
         '''
         time_list = [round(float(time),round_to) for time in time_list if time.isnumeric() or time.replace(".", "").isnumeric()]
-        max_time = max(time_list) if time_list else 0
+        max_time = max(time_list) if time_list else float(0)
         return int(max_time) if max_time.is_integer() else max_time
 
     def run_solver(self, start_time:int|float=None,
@@ -370,5 +364,6 @@ class OpenfoamUtils:
 if __name__ == "__main__":
     openfoam_config = OpenfoamConfig()
     openfoam_utils = OpenfoamUtils(openfoam_config)
-    openfoam_utils.run_solver(start_time=10.0, end_time=20.0, write_interval=0.01,save_to_numpy=True, del_dirs=False)
-    # openfoam_utils.parse_to_numpy(openfoam_config, start_time=10.51, end_time=20.0)
+    # openfoam_utils.run_solver(start_time=0.01, end_time=20.0, write_interval=0.01,save_to_numpy=False, del_dirs=False)
+    openfoam_utils.parse_to_numpy(openfoam_config, start_time=10.0, end_time=20.0, 
+                                  solver_dir="/home/shilaj/shilaj_data/repitframework/repitframework/Solvers/natural_convection")

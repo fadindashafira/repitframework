@@ -1,24 +1,14 @@
-__doc__ ='''
-Steps to re-create the RePIT project:
+"""RePIT Framework: Hybrid CFD-ML Simulation Framework with Transfer Learning"""
 
-Step 1: Convert 10th timestamp data from numpy to foam.
-Step 2: Generate the whole time steps from 10 to 20 using 0.01 timestamp as write interval (record the time it takes to run the simulation).
-Step 3: Use 10.0 to 10.03 timestamp data as training data. 
-Step 4: After the training is done using hyperparameters as same as in RePIT: lr= 0.001, epoch=5000, batch_size=10000, optimizer=Adam, loss=MSE.
-Step 5: Use the trained model to predict from the timestamp 10.04 until residue exceeds 0.001 (Average residual mass).
-Step 6: Use two time steps from the predicted timestamps to enable transfer learning. 
-Step 7: And REPEAT the process until the timestamp 20.0 is reached.
-'''
-
-from typing import Tuple, List
+from __future__ import annotations
 from pathlib import Path
 import timeit
-from copy import deepcopy
 import json
+from typing import Tuple, List
 
 import torch
 import numpy as np
-from torch.utils.data import DataLoader, Subset, Dataset
+from torch.utils.data import DataLoader, Dataset, Subset
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
@@ -26,9 +16,13 @@ from repitframework.Dataset.fvmn import FVMNDataset
 from repitframework.Models.FVMN.fvmn import FVMNetwork
 from repitframework.config import TrainingConfig, OpenfoamConfig, BaseConfig
 from repitframework.OpenFOAM import OpenfoamUtils
-from repitframework.Metrics.ResidualNaturalConvection import residual_mass, residual_momentum, residual_heat
-from repitframework.plot_utils import make_animation
 from repitframework.OpenFOAM import numpyToFoam
+from repitframework.Metrics.ResidualNaturalConvection import (
+	residual_mass, 
+	residual_momentum, 
+	residual_heat
+)
+
 
 torch.set_default_dtype(torch.float64)
 
@@ -286,8 +280,6 @@ class Trainer:
 		"""
 		path = Path.joinpath(self.training_config.model_dir, model_name)
 		model_weights = torch.load(path, weights_only=True)
-		if model_name == "pt_checkpoint.pth":
-			model_weights = model_weights["model_state_dict"]
 		self.model.load_state_dict(model_weights)
 		self.training_config.logger.info(f"Model loaded from {path}")
 		return self.model.to(self.device)
@@ -403,9 +395,9 @@ class Trainer:
 		# Calculate the residuals
 		predicted_residual_mass = residual_mass(ux_matrix=self.ux_matrix, uy_matrix=self.uy_matrix)
 		predicted_residual_momentum = residual_momentum(ux_matrix=self.ux_matrix, ux_matrix_prev=self.ux_matrix_prev,
-                                                            uy_matrix=self.uy_matrix, t_matrix=self.t_matrix)
+															uy_matrix=self.uy_matrix, t_matrix=self.t_matrix)
 		predicted_residual_heat = residual_heat(ux_matrix=self.ux_matrix, uy_matrix=self.uy_matrix,
-                                                    t_matrix=self.t_matrix, t_matrix_prev=self.t_matrix_prev)
+													t_matrix=self.t_matrix, t_matrix_prev=self.t_matrix_prev)
 		
 		# Calculate the relative residual mass: 
 		relative_residual_mass = predicted_residual_mass / self.true_residual_mass
@@ -533,7 +525,8 @@ def main(base_config:BaseConfig,
 	while running_time < training_config.prediction_end_time:
 		# Run CFD first:
 		is_solver_run = openfoam_utils.run_solver(start_time=training_start_time, 
-												  end_time=training_end_time)
+												  end_time=training_end_time,
+												  save_to_numpy=True)
 
 		if training_end_time >= trainer.training_config.prediction_end_time: break
 		# Create dataset instance
@@ -551,7 +544,8 @@ def main(base_config:BaseConfig,
 
 		# Before prediction, load the best model: because we are using the same instance of self.model for prediction, hence last trained parameters will be used.
 		model = trainer.load_model("best_model.pth")
-
+		if trainer.training_config.epochs == 5000:
+			trainer.save_model("model_gt.pth")
 		print("\nStarting prediction from: ", round(training_end_time+trainer.training_config.write_interval,2))
 		running_time = trainer.predict(prediction_start_time=training_end_time, 
 									   write_interval=trainer.training_config.write_interval)
@@ -582,8 +576,8 @@ def main_test(base_config:BaseConfig,
 	
 	# Variables:
 	# Training
-	training_start_time = 10.52
-	training_end_time = 10.54
+	training_start_time = 10.55
+	training_end_time = 10.66
 	running_time = training_start_time
 	optimizer = training_config.optimizer
 	loss_fn = training_config.loss
@@ -597,34 +591,24 @@ def main_test(base_config:BaseConfig,
 	##################### RePIT: START #####################
 	framework_start_time = timeit.default_timer()
 	training_config.logger.info(f"Framework started at {framework_start_time}")
-	training_config.epochs = 1
+	training_config.epochs = 10
 	is_solver_run = openfoam_utils.run_solver(start_time=training_start_time, 
 												  end_time=training_end_time)
 	# Create dataset instance
-	dataset = dataset_type(training_config=training_config, 
+	dataset = dataset_type(training_config=training_config,
+							first_training=False, 
 							start_time=training_start_time, 
 							end_time=training_end_time, 
 							time_step=training_config.write_interval)
 	train_loader, val_loader = get_dataloader(training_config, dataset)
 
 	# Create trainer instance
-	trainer = Trainer(training_config=training_config, model=model, optimizer=optimizer, loss_fn=loss_fn)
+	trainer = Trainer(training_config=training_config, model=model, optimizer=optimizer, loss_fn=loss_fn, model_name="model_gt.pth")
 
 	# Train the model
 	trainer.train(train_loader, val_loader, training_config.epochs)
-	while running_time < training_config.prediction_end_time:
-		print("Starting prediction from: ", running_time)
-		# Before prediction, load the best model: because we are using the same instance of self.model for prediction, hence last trained parameters will be used.
-		model = trainer.load_model("best_model.pth")
-		running_time = trainer.predict(prediction_start_time=training_end_time, 
-									   write_interval=training_config.write_interval)
-
-		training_start_time = running_time
-		training_end_time = round(training_start_time + 2*training_config.write_interval,2)
-		training_config.epochs = 2
-
-	framework_end_time = timeit.default_timer()
-	training_config.logger.info(f"Framework ended at {framework_end_time}")
+	trainer.predict(prediction_start_time=training_end_time,
+				 write_interval=training_config.write_interval)
 
 if __name__ == "__main__":
 	openfoam_config = OpenfoamConfig()

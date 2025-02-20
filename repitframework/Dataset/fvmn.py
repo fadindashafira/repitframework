@@ -4,10 +4,12 @@ import json
 
 from torch.utils.data import Dataset
 import numpy as np
-from torch import Tensor,mean, std
+from torch import Tensor, set_default_dtype, float64
 
 from repitframework.config import TrainingConfig
 from repitframework.Metrics.ResidualNaturalConvection import residual_mass
+
+set_default_dtype(float64)
 
 class FVMNDataset(Dataset):
     def __init__(self, training_config:TrainingConfig, first_training:bool, data_path:Path=None, start_time:float=None, 
@@ -209,7 +211,7 @@ class FVMNDataset(Dataset):
         temp = list()
         for data in numpy_data:
             if len(data.shape) > 2:
-                for i in range(2):
+                for i in range(self.training_config.data_dim):
                     temp.append(data[:,:,i])
             else:
                 temp.append(data)
@@ -217,8 +219,8 @@ class FVMNDataset(Dataset):
         if self.training_config.bc_type != "ground_truth":
             temp = self.training_config.hard_contraint_bc(temp)
 
-        data = [FVMNDataset.add_feature(data) for data in temp]  
-        return np.concatenate(data, axis=1)
+        data = [self.add_feature(data) for data in temp]  
+        return np.concatenate(data, axis=-1)
 
     def _calculate_difference(self, time) -> np.ndarray:
         '''
@@ -236,7 +238,7 @@ class FVMNDataset(Dataset):
         return data_t_next[:,::5] - data_t[:,::5]
     
     @staticmethod
-    def normalize(data) -> Tuple[Tensor, float, float]:
+    def normalize(data, mean=None, std=None) -> Tuple[Tensor, float, float]:
         '''
         Normalize the data.
         Args
@@ -255,8 +257,8 @@ class FVMNDataset(Dataset):
         '''
         if isinstance(data, Tensor):
             data = data.cpu().numpy()
-        mean = np.mean(data, axis=0)
-        std = np.std(data, axis=0)
+        mean = np.mean(data, axis=0) if mean is None else mean
+        std = np.std(data, axis=0) if std is None else std
         normalized_data = (data - mean)/std
         return Tensor(normalized_data), mean, std
     
@@ -275,18 +277,29 @@ class FVMNDataset(Dataset):
             labels.append(self._calculate_difference(time))
         inputs = np.concatenate(inputs, axis=0)
         labels = np.concatenate(labels, axis=0)
-        normalized_inputs,input_MEAN, input_STD = self.normalize(inputs)
-        normalized_labels,label_MEAN, label_STD = self.normalize(labels)
 
+        metrics_save_path = self.training_config.model_dir / "denorm_metrics.json"
         if self.first_training:
+            normalized_inputs,input_MEAN, input_STD = self.normalize(inputs)
+            normalized_labels,label_MEAN, label_STD = self.normalize(labels)
             # Saving the mean and std for denormalization while predicting.
             true_residual_mass = self._calculate_residual(self.end_time)
-            metrics_save_path = self.training_config.model_dir / "denorm_metrics.json"
             # While preparing for new inputs and labels, if this file already exists, it will be overwritten.
             with open(metrics_save_path, "w") as f:
                 json.dump({"input_MEAN": input_MEAN.tolist(), "input_STD": input_STD.tolist(), 
                         "label_MEAN": label_MEAN.tolist(), "label_STD": label_STD.tolist(),
                         "true_residual_mass":true_residual_mass}, f, indent=4)
+            return Tensor(normalized_inputs), Tensor(normalized_labels)
+        
+        with open(metrics_save_path, "r") as f:
+            metrics = json.load(f)
+        input_MEAN = metrics["input_MEAN"]
+        input_STD = metrics["input_STD"]
+        label_MEAN = metrics["label_MEAN"]
+        label_STD = metrics["label_STD"]
+
+        normalized_inputs, *_ = self.normalize(inputs, input_MEAN, input_STD)
+        normalized_labels, *_ = self.normalize(labels, label_MEAN, label_STD)
 
         return Tensor(normalized_inputs), Tensor(normalized_labels)
     
@@ -295,7 +308,7 @@ class FVMNDataset(Dataset):
         running_time = self.start_time
         while running_time <= self.end_time:
             time_list.append(round(running_time, self.training_config.round_to))
-            running_time += self.time_step
+            running_time = round(running_time+self.time_step, self.training_config.round_to)
         return time_list
     
     def __len__(self):
@@ -310,7 +323,7 @@ if __name__ == "__main__":
     start_time = 10.0
     end_time = 10.02
     time_step = 0.01
-    data = FVMNDataset(training_config,True, data_path, start_time, end_time, time_step)
+    data = FVMNDataset(training_config,False, data_path, start_time, end_time, time_step)
     inputs , labels = data._prepare_inputs_and_labels()
     print(inputs.shape, labels.shape, len(data))
 

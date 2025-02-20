@@ -14,7 +14,9 @@ setup(
         "numpy",   # List of dependencies
         "pandas",
         "Ofpp",
-        "torch"
+        "torch",
+        "imageio",
+        "tqdm"
     ],
     classifiers=[
         "Programming Language :: Python :: 3",

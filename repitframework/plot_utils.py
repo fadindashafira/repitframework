@@ -257,7 +257,7 @@ def get_probes_data(pred_time_list:list[int|float],
 		
 	return probes_data
 
-def quantitative_anlysis(pred_time_list:list[int|float],
+def quantitative_analysis(pred_time_list:list[int|float],
 						np_data_dir:Path=None,
 						save_name:str= "velocity-x (m/s)"):
 	'''
@@ -299,13 +299,13 @@ def quantitative_anlysis(pred_time_list:list[int|float],
 	plt.rcParams['xtick.labelsize'] = 18          # x tick label size
 	plt.rcParams['ytick.labelsize'] = 18          # y tick label size
 	match save_name:
-		case "velocity-x (m/s)"|"U_x":
+		case "velocity-x"|"U_x":
 			ground_truth_data = probes_data["U_x"]["ground_truth"]
 			predicted_data = probes_data["U_x"]["predicted"]
-		case "velocity-y (m/s)"|"U_y":
+		case "velocity-y"|"U_y":
 			ground_truth_data = probes_data["U_y"]["ground_truth"]
 			predicted_data = probes_data["U_y"]["predicted"]
-		case "temperature (K)"|"T":
+		case "temperature"|"T":
 			ground_truth_data = probes_data["T"]["ground_truth"]
 			predicted_data = probes_data["T"]["predicted"]
 
@@ -336,13 +336,15 @@ def quantitative_anlysis(pred_time_list:list[int|float],
 	ax[1].margins(x=0)
 
 	fig.tight_layout()
-	fig.savefig(base_config.root_dir / "plots" / np_data_dir.name / f"{save_name.split(" ")[0]}_analysis.png")
+	save_dir = base_config.root_dir / "plots" / np_data_dir.name
+	save_dir.mkdir(parents=True, exist_ok=True)
+	fig.savefig(save_dir / f"{save_name}_analysis.png")
 
 if __name__ == "__main__":
 
 	base_config = BaseConfig()
 	full_time_list = np.round(np.arange(10.01, 20.0, 0.01),2)
-	with open("/home/shilaj/repitframework/repitframework/ModelDump/natural_convection/prediction_metrics.json","r") as f:
+	with open("/home/shilaj/shilaj_data/repitframework/repitframework/ModelDump/natural_convection/prediction_metrics.json","r") as f:
 		metrics = json.load(f)
 	time_list = metrics["Running Time"]
 	# make_animation(base_config=base_config,
@@ -352,10 +354,10 @@ if __name__ == "__main__":
 	# 				plot_pred_gaps=True,
 	# 				save_name="prediction_simulation_5",
 	# 				np_data_dir="/home/shilaj/repitframework/repitframework/Assets/natural_convection",)
-	save_name_list = ["velocity-x (m/s)", "velocity-y (m/s)", "temperature (K)"]
-	quantitative_anlysis(pred_time_list=time_list,
-						np_data_dir=Path("/home/shilaj/repitframework/repitframework/Assets/natural_convection"),
-						save_name=save_name_list[0])
+	save_name_list = ["velocity-x", "velocity-y", "temperature"]
+	quantitative_analysis(pred_time_list=time_list,
+						np_data_dir=Path("/home/shilaj/shilaj_data/repitframework/repitframework/Assets/natural_convection"),
+						save_name=save_name_list[-1])
 	# visualize_output(base_config=base_config,
 	# 				timestamp=10.51,
 	# 				is_ground_truth=True,
