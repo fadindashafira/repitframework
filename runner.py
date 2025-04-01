@@ -12,9 +12,9 @@ from torch.utils.data import DataLoader, Dataset, Subset
 from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
-from repitframework.Dataset.fvmn import FVMNDataset, PhiDataset
+from repitframework.Dataset.fvmn import FVMNDataset
 from repitframework.Models.FVMN.fvmn import FVMNetwork
-from repitframework.config import TrainingConfig, OpenfoamConfig, BaseConfig
+from repitframework.config import TrainingConfig, OpenfoamConfig
 from repitframework.OpenFOAM import OpenfoamUtils
 from repitframework.OpenFOAM import numpyToFoam
 from repitframework.Metrics.ResidualNaturalConvection import (
@@ -25,6 +25,9 @@ from repitframework.Metrics.ResidualNaturalConvection import (
 
 
 torch.set_default_dtype(torch.float64)
+torch.manual_seed(1004)
+torch.cuda.manual_seed_all(1004)
+np.random.seed(1004)
 
 def freeze_layers(model:torch.nn.Module, num_layers:int):
 	'''
@@ -36,27 +39,31 @@ def freeze_layers(model:torch.nn.Module, num_layers:int):
 			for param in layer.parameters():
 				param.requires_grad = False
 
-def get_dataloader(training_config, dataset, batch_size=None):
-    """
-    Returns DataLoaders that provide (x, y) batches for training and validation.
-    
-    If `dataset_phi` is provided, it ensures `x` and `y` batches are aligned correctly.
-    """
-    batch_size = batch_size if batch_size else training_config.batch_size
+def get_dataloader(training_config:TrainingConfig, 
+				   dataset, 
+				   batch_size=None):
+	"""
+	Returns DataLoaders that provide (x, y) batches for training and validation.
+	
+	If `dataset_phi` is provided, it ensures `x` and `y` batches are aligned correctly.
+	"""
+	batch_size = batch_size if batch_size else training_config.batch_size
 
-    # Split indices for train/validation
-    data_size = len(dataset)
-    indices = list(range(data_size))
-    train_indices, val_indices = train_test_split(indices, test_size=0.2, random_state=1004)
+	# Split indices for train/validation
+	data_size = len(dataset)
+	indices = list(range(data_size))
+	train_indices, val_indices = train_test_split(indices, test_size=0.2, random_state=1004)
+	# train_indices = indices[:int(2*data_size/3)]
+	# val_indices = indices[int(2*data_size/3):]
 
-    train_dataset = Subset(dataset, train_indices)
-    val_dataset = Subset(dataset, val_indices)
+	train_dataset = Subset(dataset, train_indices)
+	val_dataset = Subset(dataset, val_indices)
 
-    # Create DataLoaders for X (dataset)
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
+	# Create DataLoaders for X (dataset)
+	train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
+	val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
 
-    return train_loader, val_loader
+	return train_loader, val_loader
 
 class Trainer:
 	def __init__(self, training_config:TrainingConfig, 
@@ -67,9 +74,13 @@ class Trainer:
 		self.training_config = training_config
 		self.device = training_config.device
 		self.model = model
-		self.load_model(model_name) if model_name else None
 		self.model.to(self.device)
-		self.optimizer = optimizer(self.model.parameters(), lr=training_config.learning_rate)
+		self.optimizer:torch.optim.Adam = optimizer(self.model.parameters(), lr=training_config.learning_rate)
+
+		# Load the model if model_name is provided
+		if model_name:
+			self.load_model(model_name, load_optimizer=True)
+			self.training_config.epochs = 0 # To skip initial training for 5000 epochs and use the best saved model from this training.
 		self.loss_fn = loss_fn
 		self.best_val_accuracy = float("inf")
 
@@ -92,7 +103,7 @@ class Trainer:
 			  val_loader:DataLoader, 
 			  epochs, freeze:bool) -> bool:
 		
-		if freeze: freeze_layers(self.model, num_layers=2)
+		if freeze: freeze_layers(self.model, num_layers=4)
 		for epoch in tqdm(range(epochs), desc="Epochs", leave=False):
 			self.model.train()  # Set the model to training mode
 			train_loss = 0.0
@@ -127,13 +138,13 @@ class Trainer:
 
 			self.training_config.log_metrics(key="Epoch", value=epoch+1, metrics_type="training")
 			self.training_config.log_metrics(key="Training Loss", value=train_loss, metrics_type="training")
-			training_config.logger.info(f"Epoch {epoch + 1}, Loss: {train_loss:.4f}")
+			training_config.logger.debug(f"Epoch {epoch + 1}, Loss: {train_loss:.4f}")
 
 			# Validation loss
 			val_loss = self.validate(val_loader)
 			if val_loss < self.best_val_accuracy:
 				self.best_val_accuracy = val_loss
-				self.save_model(f"best_model.pth")
+				self.save_model(f"best_model.pth", epoch, train_loss, val_loss)
 			self.training_config.log_metrics(key="Validation Loss", value=val_loss, metrics_type="training")
 
 		return True
@@ -165,7 +176,7 @@ class Trainer:
 				val_loss += loss.item() * x_val.size(0)
 		
 		val_loss /= len(val_loader.dataset)
-		training_config.logger.info(f"Validation Loss: {val_loss:.4f}")
+		training_config.logger.debug(f"Validation Loss: {val_loss:.4f}")
 		return val_loss
 	
 	def train_on_residual(self, train_loader:DataLoader,
@@ -206,7 +217,7 @@ class Trainer:
 
 			self.training_config.log_metrics(key="Epoch", value=epoch+1, metrics_type="training")
 			self.training_config.log_metrics(key="Training Loss", value=train_loss, metrics_type="training")
-			training_config.logger.info(f"Epoch {epoch + 1}, Loss: {train_loss:.4f}")
+			training_config.logger.debug(f"Epoch {epoch + 1}, Loss: {train_loss:.4f}")
 
 			# Validation loss
 			val_loss = self.validate(val_loader)
@@ -219,12 +230,12 @@ class Trainer:
 	def _normalize(self, data:torch.Tensor, mean:np.ndarray, std:np.ndarray):
 		data = data.numpy()
 		data = (data-mean) / std
-		return torch.Tensor(data)
+		return torch.from_numpy(data)
 
 	def _denormalize(self, data:torch.Tensor, mean:np.ndarray, std:np.ndarray):
 		data = data.numpy()
 		data = (data * std) + mean
-		return torch.Tensor(data)
+		return torch.from_numpy(data)
 	
 	def predict(self, prediction_start_time:int|float=None, 
 				write_interval:int|float=None, 
@@ -275,7 +286,10 @@ class Trainer:
 			# So, we need to step down the running time by the write interval outside the loop.
 		return round(running_time-time_step, self.training_config.round_to)
 
-	def save_model(self, model_name:str) -> Path:
+	def save_model(self, model_name:str,
+				epochs:int=0, 
+				train_loss:float=0.0, 
+				val_loss:float=0.0) -> Path:
 		'''
 		Parameters
 		----------
@@ -290,19 +304,29 @@ class Trainer:
 			It will be saved in the repiframework/ModelDump/{case_name} directory.
 		'''
 		path = Path.joinpath(self.training_config.model_dir, model_name)
-		torch.save(self.model.state_dict(), path)
-		self.training_config.logger.info(f"Model saved as {model_name} at {self.training_config.model_dir}")
+		torch.save({
+			"epoch": epochs,
+			"model_state_dict": self.model.state_dict(),
+			"optimizer_state_dict": self.optimizer.state_dict(),
+			"train_loss": train_loss,
+			"val_loss": val_loss,
+			}, 
+			path
+		)
+		self.training_config.logger.debug(f"Model saved as {model_name} at {self.training_config.model_dir}")
 		return path
 
-	def load_model(self, model_name:str):
+	def load_model(self, model_name:str, load_optimizer:bool=False) -> torch.nn.Module:
 		"""
 		This is for transfer learning. We load the model from the saved model.
 		Epochs= 20
 		"""
 		path = Path.joinpath(self.training_config.model_dir, model_name)
-		model_weights = torch.load(path, weights_only=True)
-		self.model.load_state_dict(model_weights)
-		self.training_config.logger.info(f"Model loaded from {path}")
+		checkpoint = torch.load(path, weights_only=True)
+		self.model.load_state_dict(checkpoint["model_state_dict"])
+		if load_optimizer:
+			self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+		self.training_config.logger.debug(f"Model loaded from {path}")
 		return self.model.to(self.device)
 	
 	def get_ground_truth_data(self, time_step:int|float, 
@@ -422,7 +446,7 @@ class Trainer:
 		
 		# Calculate the relative residual mass: 
 		relative_residual_mass = predicted_residual_mass / self.true_residual_mass
-		self.training_config.logger.info(f"Relative Residual Mass: {relative_residual_mass}")
+		self.training_config.logger.debug(f"Relative Residual Mass: {relative_residual_mass}")
 
 		self.training_config.log_metrics(key="Running Time", value=time_step)
 		self.training_config.log_metrics(key="Predicted Residual Mass", value=predicted_residual_mass)
@@ -492,7 +516,7 @@ class Trainer:
 
 			temp_ = [FVMNDataset.add_feature(data) for data in ground_truth]
 			input_data = np.concatenate(temp_, axis=-1)
-			return torch.Tensor(input_data)
+			return torch.from_numpy(input_data)
 		
 		temp = self.apply_boundary_conditions(data, time_step, data_path, bc_type=self.training_config.bc_type)
 
@@ -502,7 +526,7 @@ class Trainer:
 		t_scalar = self.t_matrix.reshape(-1,1, order="F")
 		np.save(data_path / f"U_{time_step}_predicted.npy", u_vector)
 		np.save(data_path / f"T_{time_step}_predicted.npy", t_scalar)
-		self.training_config.logger.info(f"Saved variables at {data_path}")
+		self.training_config.logger.debug(f"Saved variables at {data_path}")
 		##################### Saved the predicted values #####################
 
 		self.relative_residual_mass = self.calculate_residuals(time_step)
@@ -510,14 +534,26 @@ class Trainer:
 		temp_ = [FVMNDataset.add_feature(data) for data in temp]
 		data = np.concatenate(temp_, axis=1)
 
-		return torch.Tensor(data)
+		return torch.from_numpy(data)
+
+def dynamic_epochs(switch_count:int):
+	if switch_count % 10 == 0:
+		increment_factor = np.log(switch_count).item()
+		return int(2 + np.log(switch_count/10).item()**2)
+	return 10
+
+def dynamic_CFD_runs(switch_count:int):
+	if switch_count % 10 == 0:
+		increment_factor = 1
+		return int(10 + (switch_count*increment_factor/10))
+	return 10
 
 def main( 
-		 openfoam_config:OpenfoamConfig, 
-		 training_config:TrainingConfig,
-		 network_type:torch.nn.Module=FVMNetwork,
-		 dataset_type:Dataset=FVMNDataset,
-		 ):
+	openfoam_config:OpenfoamConfig, 
+	training_config:TrainingConfig,
+	network_type:torch.nn.Module=FVMNetwork,
+	dataset_type:Dataset=FVMNDataset,
+	) -> None:
 	
 	# Variables:
 	# Training
@@ -533,97 +569,127 @@ def main(
 
 	##################### RePIT: START #####################
 	framework_start_time = timeit.default_timer()
-	training_config.logger.info(f"Framework started at {framework_start_time}")
 
-	trainer = Trainer(training_config=training_config, model=model, optimizer=optimizer, loss_fn=loss_fn)
-	# To skip initial training for 5000 epochs and use the best saved model from this training.
-	# trainer.training_config.epochs = 1
-	# trainer.best_val_accuracy = 1.0
+	trainer = Trainer(
+		training_config=training_config, 
+		model=model, 
+		optimizer=optimizer, 
+		loss_fn=loss_fn,
+		model_name="init_model.pth" # Set this to None if you don't want to use pre-trained model.
+	)
 	# Create trainer instance
 	first_training = True
 
+	# Storing times 
+	cfd_times = 0.0
+	ml_times = 0.0
+	update_times = 0.0
+
+	switch_count = 0
+	ml_timesteps = 0
+	cfd_timesteps = 0
+	training_config.logger.info(f"Framework started at {timeit.default_timer()}")
 	while running_time < training_config.prediction_end_time:
 		# Run CFD first:
+		cfd_start_time = timeit.default_timer()
 		openfoam_utils.run_solver(
-								start_time=training_start_time, 
-								end_time=training_end_time,
-								save_to_numpy=True
-								)
-
+			start_time=training_start_time, 
+			end_time=training_end_time,
+			save_to_numpy=False
+		)
+		cfd_end_time = timeit.default_timer()
 		if training_end_time >= trainer.training_config.prediction_end_time: break
-
 		# Create dataset instance
 		dataset = dataset_type(
-							training_config=trainer.training_config,
-							first_training=first_training, 
-							start_time=training_start_time, 
-							end_time=training_end_time, 
-							time_step=trainer.training_config.write_interval
-							)
+			training_config=trainer.training_config,
+			first_training=first_training, 
+			start_time= round(training_end_time - 2*trainer.training_config.write_interval, 2), 
+			end_time=training_end_time, 
+			time_step=trainer.training_config.write_interval
+		)
 			
 		train_loader, val_loader = get_dataloader(
-												training_config, 
-												dataset, 
-												batch_size=trainer.training_config.batch_size
-												)
+			training_config, 
+			dataset, 
+			batch_size=trainer.training_config.batch_size
+		)
 
 		# Train the model
+		update_start_time = timeit.default_timer()
 		trainer.train(
-					train_loader, 
-					val_loader, 
-					trainer.training_config.epochs,
-					freeze=False
-					)
-		# if running_time > 10.02:
-		# 	trainer.train_on_residual(
-		# 							train_loader, 
-		# 							val_loader
-		# 							)
-		
+			train_loader, 
+			val_loader, 
+			trainer.training_config.epochs,
+			freeze=False
+		)
+		update_end_time = timeit.default_timer()
+
 		trainer.best_val_accuracy = float("inf") # Reset the best validation accuracy for transfer learning
 		trainer.relative_residual_mass = 1.0 # Reset the relative residual mass for transfer learning
 
 		# Before prediction, load the best model: because we are using the same instance of self.model for prediction, hence last trained parameters will be used.
-		model = trainer.load_model("best_model.pth")
+		model = trainer.load_model("best_model.pth", load_optimizer=True)
 
-		if trainer.training_config.epochs == 5000: trainer.save_model("model_gt.pth")
-
-		print("\nStarting prediction from: ", round(
-												training_end_time+trainer.training_config.write_interval,
-												2
-												)
-			)
+		if trainer.training_config.epochs == 5000: trainer.save_model("init_model.pth")
 		
+		print("\nStarting prediction from: ", 
+			round(training_end_time+trainer.training_config.write_interval,2)
+		)
+		# Store times 
+		if running_time > training_config.training_start_time:
+			cfd_times += cfd_end_time - cfd_start_time
+			update_times += update_end_time - update_start_time
+	
+		ml_start_time = timeit.default_timer()
+
 		running_time = trainer.predict(
-									prediction_start_time=training_end_time, 
-									write_interval=trainer.training_config.write_interval
-									)
+			prediction_start_time=training_end_time, 
+			write_interval=trainer.training_config.write_interval
+		)
+
+		ml_end_time = timeit.default_timer()
+		ml_times += ml_end_time - ml_start_time
+
+		# ML timesteps per cross-computation
+		ml_timesteps += round((running_time - training_end_time)/trainer.training_config.write_interval)
+		print("ML timesteps: ", round((running_time - training_end_time)/trainer.training_config.write_interval))
+		print("Switch count: ", switch_count)
+		switch_count += 1
+
 		print(f"Prediction ended at:{running_time}\n")
 
 		# Convert predicted numpy to foam
 		numpyToFoam_string = numpyToFoam(
-									openfoam_config=openfoam_config, 
-									latestML_time=float(running_time), 
-									latestCFD_time=training_end_time
-									)
+			openfoam_config=openfoam_config, 
+			latestML_time=float(running_time), 
+			latestCFD_time=training_end_time,
+		)
 
 		openfoam_config.logger.info(f"Converted numpy to foam: {numpyToFoam_string}")
 
 		# Transfer learning
-		training_start_time = round(
-								running_time+trainer.training_config.write_interval, 
-								2
-								) # Because until running time, we'd already predicted the data.
-		training_end_time = round(
-								training_start_time + 9*trainer.training_config.write_interval,
-								2
-								)
-		trainer.training_config.epochs = 10
+		trainer.training_config.epochs = dynamic_epochs(switch_count)
+		cfd_runs = dynamic_CFD_runs(switch_count)
+		cfd_timesteps += cfd_runs
+		# trainer.training_config.epochs = 2
+		# cfd_runs = 10
+		training_end_time = round(running_time + cfd_runs*trainer.training_config.write_interval,
+								  2)
+		# Just using last three time steps for transfer learning: 
+		training_start_time = round(training_end_time - (cfd_runs-1)*trainer.training_config.write_interval, 2)
 		first_training = False
 
 
 	framework_end_time = timeit.default_timer()
 	training_config.logger.info(f"Framework ended at {framework_end_time}")
+	training_config.logger.info(f"Total CFD Time: {cfd_times}")
+	training_config.logger.info(f"Total ML Time: {ml_times}")
+	training_config.logger.info(f"Total Update Time: {update_times}")
+	training_config.logger.info(f"Total Framework Time: {framework_end_time-framework_start_time}")
+	training_config.logger.info(f"CFD+ML+update times: {cfd_times+ml_times+update_times}")
+	training_config.logger.info(f"Total ML timesteps: {ml_timesteps}")
+	training_config.logger.info(f"Total CFD runs: {cfd_timesteps}")
+	training_config.logger.info(f"ML timesteps per cross-computation: {ml_timesteps/switch_count}")
 
 if __name__ == "__main__":
 	openfoam_config = OpenfoamConfig()

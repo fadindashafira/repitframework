@@ -12,8 +12,16 @@ from repitframework.Metrics.ResidualNaturalConvection import residual_mass
 set_default_dtype(float64)
 
 class FVMNDataset(Dataset):
-    def __init__(self, training_config:TrainingConfig, first_training:bool, data_path:Path=None, start_time:float=None, 
-                 end_time:float=None, time_step:float=None, vars_list:list=None):
+    def __init__(
+            self, 
+            training_config:TrainingConfig, 
+            first_training:bool, 
+            data_path:Path=None, 
+            start_time:float=None, 
+            end_time:float=None, 
+            time_step:float=None, 
+            vars_list:list=None
+        ):
         '''
         Keep in mind
         ------------
@@ -68,7 +76,6 @@ class FVMNDataset(Dataset):
         self.inputs, self.labels = self._prepare_inputs_and_labels()
 
     def _is_present(self) -> bool:
-        # time_list = np.arange(self.start_time, self.end_time + self.time_step, self.time_step)
         for var in self.vars:
             for time in self.time_list:
                 if not (self.data_path / f"{var}_{round(time, self.training_config.round_to)}.npy").exists():
@@ -286,13 +293,18 @@ class FVMNDataset(Dataset):
             true_residual_mass = self._calculate_residual(self.end_time)
             # While preparing for new inputs and labels, if this file already exists, it will be overwritten.
             with open(metrics_save_path, "w") as f:
-                json.dump({"input_MEAN": input_MEAN.tolist(), "input_STD": input_STD.tolist(), 
-                        "label_MEAN": label_MEAN.tolist(), "label_STD": label_STD.tolist(),
-                        "true_residual_mass":true_residual_mass}, f, indent=4)
+                json.dump(
+                    {
+                        "input_MEAN": input_MEAN.tolist(), 
+                        "input_STD": input_STD.tolist(), 
+                        "label_MEAN": label_MEAN.tolist(), 
+                        "label_STD": label_STD.tolist(),
+                        "true_residual_mass":true_residual_mass
+                    }, f, indent=4
+                    )
             return Tensor(normalized_inputs), Tensor(normalized_labels)
         
-        with open(metrics_save_path, "r") as f:
-            metrics = json.load(f)
+        with open(metrics_save_path, "r") as f: metrics = json.load(f)
         input_MEAN = metrics["input_MEAN"]
         input_STD = metrics["input_STD"]
         label_MEAN = metrics["label_MEAN"]
