@@ -398,10 +398,10 @@ if __name__ == "__main__":
     # openfoam_utils.run_solver(start_time=10.0, end_time=110.0, write_interval=0.01,save_to_numpy=False, del_dirs=False)
     openfoam_utils.parse_to_numpy(
         openfoam_config, 
-        start_time=98.0, 
+        start_time=100.0, 
         end_time=110.0, 
-        solver_dir=f"/home/shilaj/repitframework/repitframework/Solvers/{openfoam_config.solver_dir.name}",
-        save_path=f"/home/shilaj/repitframework/repitframework/Assets/{openfoam_config.solver_dir.name}_backup",
+        solver_dir=f"/home/shilaj/repitframework/repitframework/Solvers/natural_convection_case4",
+        save_path=f"/home/shilaj/repitframework/repitframework/Assets/natural_convection_case4_backup",
     )
     end_time = timeit.default_timer()
     print(f"Time taken: {end_time-start_time} seconds")
