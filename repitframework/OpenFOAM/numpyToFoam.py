@@ -138,7 +138,8 @@ def include_all_features_NC(temperature_data:np.ndarray,
 	if use_true_phi:
 		gt_phi_path = str(latestML_time_dir / "phi").replace("Solvers", "Assets")
 		gt_phi_path = Path(gt_phi_path.replace("natural_convection", "CFD_full_simulation"))
-		os.system(f"cp {gt_phi_path} {latestML_time_dir/'phi'}")
+		# os.system(f"cp {gt_phi_path} {latestML_time_dir/'phi'}")
+		os.system(f"adjustPhiML -case {latestML_time_dir.parent} -time {latestML_time_dir.name}")
 
 	return True
 
@@ -347,7 +348,7 @@ def numpyToFoam(openfoam_config:OpenfoamConfig,
 		with open(openfoam_var_path, "w") as file:
 			file.write(foam_data)
 	
-	include_all_features_NC(temperature_data, latestML_time_dir, velocity_data, use_true_phi=False)
+	include_all_features_NC(temperature_data, latestML_time_dir, velocity_data, use_true_phi=True) #TODO: change the name for use_true_phi to correct_phi
 	return output_string   
 
 	
