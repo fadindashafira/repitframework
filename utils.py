@@ -32,3 +32,13 @@ def load_from_state_dict(
     #     scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
     print(f"Model loaded from: {model_save_path/model_name} with LR: {learning_rate}")
     return model, optimizer
+
+def freeze_layers(model:torch.nn.Module, num_layers:int):
+	'''
+	Freeze the layers of the sub-network.
+	'''
+	for _, sub_network in model.networks.items():
+		layers = list(sub_network.children())
+		for layer in layers[:num_layers]:
+			for param in layer.parameters():
+				param.requires_grad = False

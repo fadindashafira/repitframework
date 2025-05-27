@@ -1,7 +1,7 @@
 from torch.utils.data import DataLoader, Subset, Dataset
 from typing import Tuple
 
-def one_third_val(
+def train_val_split(
 		dataset: Dataset, 
 		batch_size: int,
 		train_size: float = 2/3,

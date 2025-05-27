@@ -9,7 +9,6 @@ from typing import Tuple, List
 import torch
 import numpy as np
 from torch.utils.data import DataLoader, Dataset, Subset
-from sklearn.model_selection import train_test_split
 from tqdm import tqdm
 
 torch.set_default_dtype(torch.float64)
@@ -18,6 +17,7 @@ torch.cuda.manual_seed_all(1004)
 np.random.seed(1004)
 
 from repitframework.Dataset.fvmn import FVMNDataset
+from repitframework.DataLoader.loader import train_val_split
 from repitframework.Models.FVMN.fvmn import FVMNetwork
 from repitframework.config import TrainingConfig, OpenfoamConfig
 from repitframework.OpenFOAM import OpenfoamUtils
@@ -29,45 +29,7 @@ from repitframework.Metrics.ResidualNaturalConvection import (
 )
 from repitframework.Metrics.OperatorEmbeddings import compute_gradient, ceod_loss
 from repitframework.plot_utils import save_loss
-from utils import load_from_state_dict
-
-def freeze_layers(model:torch.nn.Module, num_layers:int):
-	'''
-	Freeze the layers of the sub-network.
-	'''
-	for _, sub_network in model.networks.items():
-		layers = list(sub_network.children())
-		for layer in layers[:num_layers]:
-			for param in layer.parameters():
-				param.requires_grad = False
-
-def get_dataloader(training_config:TrainingConfig, 
-				   dataset, 
-				   batch_size=None):
-	"""
-	Returns DataLoaders that provide (x, y) batches for training and validation.
-	
-	If `dataset_phi` is provided, it ensures `x` and `y` batches are aligned correctly.
-	"""
-	batch_size = batch_size if batch_size else training_config.batch_size
-
-	# Split indices for train/validation
-	data_size = len(dataset)
-	indices = list(range(data_size))
-	# train_indices, val_indices = train_test_split(indices, test_size=0.2, random_state=1004)
-	train_indices = indices[:int(2*data_size/3)]
-	val_indices = indices[int(2*data_size/3):]
-	# train_indices = indices[:-40000]
-	# val_indices = indices[-40000:]
-
-	train_dataset = Subset(dataset, train_indices)
-	val_dataset = Subset(dataset, val_indices)
-
-	# Create DataLoaders for X (dataset)
-	train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, drop_last=True)
-	val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, drop_last=False)
-
-	return train_loader, val_loader
+from utils import load_from_state_dict, freeze_layers
 
 class Trainer:
 	def __init__(self, training_config:TrainingConfig, 
@@ -79,12 +41,15 @@ class Trainer:
 		self.device = training_config.device
 		self.model = model
 		self.model.to(self.device)
-		self.optimizer:torch.optim.Adam = optimizer(self.model.parameters(), lr=training_config.learning_rate)
+		self.optimizer:torch.optim.Adam = optimizer(self.model.parameters(), lr=self.training_config.learning_rate)
 
 		# Load the model if model_name is provided
 		if model_name:
-			self.load_model(model_name, load_optimizer=True)
+			self.load_model(model_name, 
+				load_optimizer=True, 
+				learning_rate=self.training_config.learning_rate)
 			self.training_config.epochs = 0 # To skip initial training for 5000 epochs and use the best saved model from this training.
+
 		self.loss = loss
 		self.best_val_accuracy = float("inf")
 
@@ -307,7 +272,7 @@ class Trainer:
 		pseudo_ground_truth = self.get_ground_truth_data(running_time, data_path)
 		self.relative_residual_mass = residual_mass(ux_matrix=pseudo_ground_truth[self.ux_index],
 														uy_matrix=pseudo_ground_truth[self.uy_index])/self.true_residual_mass
-		with torch.no_grad():
+		with torch.inference_mode():
 			while (self.relative_residual_mass <= self.residual_threshold) and (running_time <= self.training_config.prediction_end_time):
 				prediction_input = self.prepare_input_for_prediction(running_time, data_path, prediction_input)
 				normalized_input  = self._normalize(prediction_input, input_mean, input_std)
@@ -349,7 +314,7 @@ class Trainer:
 	def load_model(self, 
 			model_name:str, 
 			load_optimizer:bool=False,
-			learning_rate:float=1e-4
+			learning_rate:float=1e-3
 			) -> torch.nn.Module:
 		"""
 		This is for transfer learning. We load the model from the saved model.
@@ -623,7 +588,7 @@ def hybrid_training(
 		model=model, 
 		optimizer=optimizer, 
 		loss=loss,
-		model_name= "init_model.pth" # Set this to None if you don't want to use pre-trained model.
+		model_name= None # Set this to None if you don't want to use pre-trained model.
 	)
 	# Create trainer instance
 	first_training = True
@@ -655,10 +620,10 @@ def hybrid_training(
 			end_time=training_end_time, 
 			time_step=trainer.training_config.write_interval
 		)
-		train_loader, val_loader = get_dataloader(
-			training_config, 
+		train_loader, val_loader = train_val_split(
 			dataset, 
-			batch_size=trainer.training_config.batch_size
+			batch_size=trainer.training_config.batch_size,
+			train_size=2/3
 		)
 
 		# Train the model
@@ -673,13 +638,17 @@ def hybrid_training(
 
 		trainer.best_val_accuracy = float("inf") # Reset the best validation accuracy for transfer learning
 		# Before prediction, load the best model: because we are using the same instance of self.model for prediction, hence last trained parameters will be used.
-		trainer.model, trainer.optimizer = load_from_state_dict(
-			model=trainer.model,
-			model_save_path=trainer.training_config.model_dir,
+		# trainer.model, trainer.optimizer = load_from_state_dict(
+		# 	model=trainer.model,
+		# 	model_save_path=trainer.training_config.model_dir,
+		# 	model_name="best_model.pth",
+		# 	optimizer=trainer.optimizer
+		# )
+		trainer.model = trainer.load_model(
 			model_name="best_model.pth",
-			optimizer=trainer.optimizer
+			load_optimizer=False,  # We don't need to load the optimizer state dict for prediction.
+			learning_rate=trainer.training_config.learning_rate
 		)
-		trainer.training_config.learning_rate = 1e-3
 
 		if trainer.training_config.epochs == 5000: 
 			trainer.save_model("init_model.pth")
@@ -751,12 +720,11 @@ def hybrid_training(
 	training_config.logger.info(f"CFD alone time: {if_CFD_alone}")
 	training_config.logger.info(f"CFD+ML+update times: {cfd_times+ml_times+update_times}")
 	training_config.logger.info(f"Acceleration: {if_CFD_alone/(ml_times + cfd_times + update_times)}")
-	training_config.logger.info("###############################################")
-
 	training_config.logger.info(f"ML timesteps per cross-computation: {ml_timesteps/switch_count}")
 	training_config.logger.info(f"t_ML: {ml_times/ml_timesteps}")
 	training_config.logger.info(f"t_CFD: {cfd_times/cfd_timesteps}")
 	training_config.logger.info(f"Real Acceleration: {if_CFD_alone/(framework_end_time-framework_start_time)}\n\n")
+	training_config.logger.info("###############################################")
 	save_loss(training_config=training_config, merge_initial_losses=False)
 
 if __name__ == "__main__":

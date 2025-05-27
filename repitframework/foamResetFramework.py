@@ -41,7 +41,7 @@ def cleanMetrics(metrics_dir:str)->None:
     metrics_dir: Path
         The path to the metrics directory.
     """
-    files_to_clean = ["prediction_metrics.json", "training_metrics.json","best_model.pth"]
+    files_to_clean = ["prediction_metrics.json", "training_metrics.json","best_model.pth", "prediction_metrics.ndjson", "training_metrics.ndjson"]
     for file in os.scandir(metrics_dir):
         if file.name in files_to_clean:
             os.system(f"rm {file.path}")
