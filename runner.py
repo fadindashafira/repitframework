@@ -27,7 +27,6 @@ from repitframework.Metrics.ResidualNaturalConvection import (
 	residual_momentum, 
 	residual_heat
 )
-from repitframework.Metrics.OperatorEmbeddings import compute_gradient, ceod_loss
 from repitframework.plot_utils import save_loss
 from utils import freeze_layers, prepare_model_and_optimizer
 
@@ -161,68 +160,6 @@ class Trainer:
 		val_loss /= len(val_loader.dataset)
 		training_config.logger.debug(f"Validation Loss: {val_loss:.4f}")
 		return val_loss
-	
-	def train_with_PIL(self, train_loader:DataLoader, 
-			  val_loader:DataLoader, 
-			  epochs, freeze:bool,
-			  switch_count:int=1) -> bool:
-		
-		self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.training_config.learning_rate)
-		if freeze: freeze_layers(self.model, num_layers=4)
-		for epoch in tqdm(range(epochs), desc="Epochs", leave=False):
-			self.model.train()  # Set the model to training mode
-			train_loss = 0.0
-			for x_batch, y_batch in train_loader:
-				x_batch = x_batch.to(self.device) 
-				y_batch = y_batch.to(self.device)
-
-				# Labels: 
-				y_T = y_batch[:,self.t_index:self.t_index+1]
-				y_ux = y_batch[:, self.ux_index:self.ux_index+1]
-				y_uy = y_batch[:, self.uy_index:self.uy_index+1]
-
-				# Forward pass: Hard coded
-				predictions = self.model(x_batch)
-				pred_T = predictions["T"]
-				pred_ux = predictions["U_x"]
-				pred_uy = predictions["U_y"]
-
-				loss_T = self.loss_fn(pred_T, y_T)
-				loss_ux = self.loss_fn(pred_ux, y_ux)
-				loss_uy = self.loss_fn(pred_uy, y_uy)
-
-				ceod_T = ceod_loss(pred_T, y_T, compute_gradient)
-				ceod_ux = ceod_loss(pred_ux, y_ux, compute_gradient)
-				ceod_uy = ceod_loss(pred_uy, y_uy, compute_gradient)
-				#TODO: hard coded
-				# Calculate the residuals
-				loss_residual = residual_mass(ux_matrix=pred_ux.reshape(200,200).transpose(0,1), uy_matrix=pred_uy.reshape(200,200).transpose(0,1))
-				loss =  0.7*(loss_T+loss_ux+loss_uy)+0.3*(ceod_T + ceod_ux + ceod_uy)
-
-
-				# if switch_count % 10 == 0:
-				# 	loss += loss_residual
-				# 	self.training_config.logger.debug(f"Residual Loss: {loss_residual:.4f}")
-				# Backpropagation
-				self.optimizer.zero_grad()
-				loss.backward()
-				self.optimizer.step()
-
-				train_loss += loss.item()*x_batch.size(0)
-			
-			train_loss /= len(train_loader.dataset)
-
-			self.training_config.log_metrics(key="Epoch", value=epoch+1, metrics_type="training")
-			self.training_config.log_metrics(key="Training Loss", value=train_loss, metrics_type="training")
-			training_config.logger.debug(f"Epoch {epoch + 1}, Loss: {train_loss:.4f}")
-
-			# Validation loss
-			val_loss = self.validate(val_loader)
-			if val_loss < self.best_val_accuracy:
-				self.best_val_accuracy = val_loss
-				self.save_model(f"best_model.pth")
-			self.training_config.log_metrics(key="Validation Loss", value=val_loss, metrics_type="training")
-		return True
 
 	def _normalize(self, data:torch.Tensor, mean:np.ndarray, std:np.ndarray):
 		data = data.numpy()
@@ -321,7 +258,7 @@ class Trainer:
 		Epochs= 20
 		"""
 		path = Path.joinpath(self.training_config.model_dir, model_name)
-		checkpoint = torch.load(path, weights_only=True)
+		checkpoint = torch.load(path, weights_only=True, map_location=self.training_config.device)
 		self.model.load_state_dict(checkpoint["model_state_dict"])
 		if load_optimizer and "optimizer_state_dict" in checkpoint:
 			self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
@@ -612,6 +549,7 @@ def hybrid_training(
 	switch_count = 0
 	ml_timesteps = 0
 	cfd_timesteps = 0
+	cfd_runs = 3
 
 	##################### RePIT: START #####################
 	framework_start_time = timeit.default_timer()
@@ -626,7 +564,11 @@ def hybrid_training(
 			save_to_numpy=True
 		)
 		cfd_end_time = timeit.default_timer()
+
+		switch_count += 1
+		cfd_timesteps += cfd_runs
 		if training_end_time >= trainer.training_config.prediction_end_time: break
+
 		# Create dataset instance
 		dataset = dataset_type(
 			training_config=trainer.training_config,
@@ -695,7 +637,6 @@ def hybrid_training(
 		ml_timesteps += round((running_time - training_end_time)/trainer.training_config.write_interval)
 		print("ML timesteps: ", round((running_time - training_end_time)/trainer.training_config.write_interval))
 		print("Switch count: ", switch_count)
-		switch_count += 1
 		print(f"Prediction ended at:{running_time}\n")
 
 		# Convert predicted numpy to foam
@@ -709,10 +650,8 @@ def hybrid_training(
 
 		# Transfer learning
 		# trainer.training_config.epochs, cfd_runs = dynamic_parameters(switch_count)
-		trainer.training_config.epochs = 2
+		trainer.training_config.epochs = 10
 		cfd_runs = 10
-		# if switch_count == 2: break
-		cfd_timesteps += cfd_runs
 		training_end_time = round(running_time + cfd_runs*trainer.training_config.write_interval,
 								  2)
 		# Just using last three time steps for transfer learning: 

@@ -1,0 +1,38 @@
+services:
+  repit:
+    build: .
+    container_name: repit_container
+
+    # The 'deploy' key is the modern way to define resource allocation.
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              # Use 'count: 1' to request one GPU. 
+              # Docker decides which specific GPU to assign.
+              # To request ALL available GPUs, you would use 'count: all'.
+              count: 1
+              capabilities: [gpu]
+        limits:
+          # NOTE: '128.0' CPUs is likely not what you intend.
+          # This has been changed to a more common limit of 8 cores. Adjust as needed.
+          cpus: '128.0'        
+          memory: 32G        # max 32 GB RAM
+
+    # CRITICAL: You should remove this environment variable.
+    # The 'deploy.resources' section above handles GPU visibility.
+    # Inside the container, the single assigned GPU will appear as GPU 0.
+    # Setting this variable can conflict with Docker's allocation.
+    # environment:
+    #   - NVIDIA_VISIBLE_DEVICES=1 
+
+    volumes:
+      - ./:/home/ninelab/repitframework  
+
+    ports:
+      - "8888:8888"  # optional, remove if not running Jupyter or server
+
+    # These are important for keeping the container running and for interactive use
+    tty: true
+    stdin_open: true

@@ -441,14 +441,15 @@ def quantitative_analysis(
 		plot_prediction_only=plot_prediction_only
 	)
 
+	if max(full_time_list) > 20:
+		linewidth = 1
+	else:
+		linewidth = 3
+
 	with open(prediction_dir / "probes_data.json", "w") as f:
 		json.dump(probes_data, f, indent=4)
 	
 	fig, ax = plt.subplots(2, 1, figsize=(15,10))
-	plt.rcParams['axes.titlesize'] = 22           # Title font size
-	plt.rcParams['axes.labelsize'] = 20           # x and y label font size
-	plt.rcParams['xtick.labelsize'] = 18          # x tick label size
-	plt.rcParams['ytick.labelsize'] = 18          # y tick label size
 	is_temp = False
 	match save_name:
 		case "velocity-x"|"U_x":
@@ -461,12 +462,12 @@ def quantitative_analysis(
 			ground_truth_data = probes_data["T"]["ground_truth"]
 			predicted_data = probes_data["T"]["predicted"]
 			is_temp = True
-	ax[0].plot(ground_truth_data["t1"], label="T1", linestyle="-", color="red")
-	ax[0].plot(ground_truth_data["t2"], label="T2", linestyle="-", color="green")
-	ax[0].plot(ground_truth_data["t3"], label="T3", linestyle="-", color="blue")
-	ax[0].plot(predicted_data["t1"], linestyle="--", color="red")
-	ax[0].plot(predicted_data["t2"], linestyle="--", color="green")
-	ax[0].plot(predicted_data["t3"], linestyle="--", color="blue")
+	ax[0].plot(ground_truth_data["t1"], label="T1", linestyle="-", color="red", linewidth=linewidth,)
+	ax[0].plot(ground_truth_data["t2"], label="T2", linestyle="-", color="green", linewidth=linewidth)
+	ax[0].plot(ground_truth_data["t3"], label="T3", linestyle="-", color="blue", linewidth=linewidth)
+	ax[0].plot(predicted_data["t1"], linestyle="--", color="red", linewidth=linewidth)
+	ax[0].plot(predicted_data["t2"], linestyle="--", color="green", linewidth=linewidth)
+	ax[0].plot(predicted_data["t3"], linestyle="--", color="blue", linewidth=linewidth)
 	ax[0].legend()
 	ax[0].grid()
 	ax[0].set_title("Top Wall")
@@ -477,13 +478,14 @@ def quantitative_analysis(
 	# else: 
 	# 	ax[0].set_ylim(-0.1,0.2)
 	ax[0].margins(x=0)
+	ax[0].grid(True, color='gray', linestyle='--', linewidth=0.5, alpha=0.7)
 	
-	ax[1].plot(ground_truth_data["b1"], label="B1", linestyle="-", color="red")
-	ax[1].plot(ground_truth_data["b2"], label="B2", linestyle="-", color="green")
-	ax[1].plot(ground_truth_data["b3"], label="B3", linestyle="-", color="blue")
-	ax[1].plot(predicted_data["b1"], linestyle="--", color="red")
-	ax[1].plot(predicted_data["b2"], linestyle="--", color="green")
-	ax[1].plot(predicted_data["b3"], linestyle="--", color="blue")
+	ax[1].plot(ground_truth_data["b1"], label="B1", linestyle="-", color="red", linewidth=linewidth)
+	ax[1].plot(ground_truth_data["b2"], label="B2", linestyle="-", color="green", linewidth=linewidth)
+	ax[1].plot(ground_truth_data["b3"], label="B3", linestyle="-", color="blue", linewidth=linewidth)
+	ax[1].plot(predicted_data["b1"], linestyle="--", color="red", linewidth=linewidth)
+	ax[1].plot(predicted_data["b2"], linestyle="--", color="green", linewidth=linewidth)
+	ax[1].plot(predicted_data["b3"], linestyle="--", color="blue", 	linewidth=linewidth)
 	ax[1].legend()
 	ax[1].grid()
 	ax[1].set_title("Bottom Wall")
@@ -494,6 +496,7 @@ def quantitative_analysis(
 	# 	ax[1].set_ylim(-0.1,0.04)
 	ax[1].set_ylabel(save_name)
 	ax[1].margins(x=0)
+	ax[1].grid(True, color='gray', linestyle='--', linewidth=0.5, alpha=0.7)
 
 	fig.tight_layout()
 	#Save the plot
@@ -621,6 +624,7 @@ def plot_L2_error(
 	pred_time_list: list[float],
 	ground_truth_dir: Path,
 	prediction_dir: Path,
+	plots_path: Path = None,
 	var_name: str = "temperature"
 ):
 	"""
@@ -629,7 +633,8 @@ def plot_L2_error(
 	vars_dict = {
 		"velocity-x": "U",
 		"temperature": "T",
-		"U_x": "U"
+		"U_x": "U",
+		"T": "T"
 	}
 	l2_errors = []
 	for timestamp in pred_time_list:
@@ -647,12 +652,16 @@ def plot_L2_error(
 	# Plot
 	plt.figure(figsize=(8, 5))
 	plt.plot(pred_time_list, l2_errors, label="Relative L2 Error", color="purple", linewidth=2)
+	# Highlight the max AE point
+	max_l2error_timestep = pred_time_list[np.argmax(l2_errors)]
+	plt.scatter(max_l2error_timestep, max(l2_errors), color="red", label=f"MaxL2: {max(l2_errors):.3f} at t={max_l2error_timestep:.2f}")
 	plt.xlabel("Timestamps")
 	plt.ylabel("Relative L2 Error")
 	plt.title(f"L2 Error ({var_name})")
 	plt.legend()
 	plt.grid(True)
-	plots_path = Path(str(prediction_dir).replace("Assets", "plots"))
+	if plots_path is None:
+		plots_path = Path(str(prediction_dir).replace("Assets", "plots"))
 	plots_path.mkdir(parents=True, exist_ok=True)
 	plt.savefig(plots_path / f"{var_name}_L2_error.png", bbox_inches='tight')
 	plt.close()
@@ -1182,6 +1191,6 @@ if __name__ == "__main__":
 
 	training_config = TrainingConfig()
 
-	plot_everything(plot_start_time=10.0, plot_end_time=20.0, residual_limit=training_config.residual_threshold)
-	transfer_to_required_directory("2epochs5res", "case1", 1000)
+	plot_everything(plot_start_time=10.0, plot_end_time=110.0, residual_limit=training_config.residual_threshold)
+	transfer_to_required_directory("single_training", "case1", 10000)
 

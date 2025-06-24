@@ -40,7 +40,6 @@ def freeze_layers(model:torch.nn.Module, num_layers:int):
 	for _, sub_network in model.networks.items():
 		layers = list(sub_network.children())
 		for layer in layers[:num_layers]:
-			layer.eval()
 			for param in layer.parameters():
 				param.requires_grad = False
 	

@@ -1,4 +1,4 @@
-name: repit_env_test
+name: repit_env
 channels:
   - conda-forge
   - defaults

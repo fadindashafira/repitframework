@@ -115,7 +115,7 @@ def include_all_features_NC(temperature_data:np.ndarray,
 	return "Done!"
 
 def format_number(x):
-	"""Format a number to 12 significant digits without scientific notation."""
+	"""Format a number to 17 significant digits without scientific notation."""
 	return f"{x:.12g}"  # Uses 12 significant figures, trims trailing zeros
 
 def parse_numpy(data: np.ndarray) -> str:
