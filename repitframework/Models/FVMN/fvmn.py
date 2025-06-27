@@ -3,7 +3,7 @@ from repitframework.config import TrainingConfig
 
 class FVMNetwork(torch.nn.Module):
     def __init__(self, training_config:TrainingConfig, vars_list:list=None,
-                 hidden_layers:int=3, hidden_size:int=398, activation:torch.nn.ReLU=None):
+                 hidden_layers:int=3, hidden_size:int=398, activation:torch.nn.ReLU=None, dropout=0.2):
         '''
         Args
         ---- 
@@ -25,6 +25,7 @@ class FVMNetwork(torch.nn.Module):
         self.hidden_layers = hidden_layers
         self.hidden_size = hidden_size
         self.activation = activation if activation is not None else training_config.activation
+        self.dropout = torch.nn.Dropout(dropout) if dropout is not None else None
         
         # Create networks dynamically based on vars_list
         self.networks = torch.nn.ModuleDict(
@@ -38,6 +39,7 @@ class FVMNetwork(torch.nn.Module):
         returns output for each variable as a tuple: 
         (ux_hat, uy_hat, t_hat)
         '''
+        
         outputs = {var: net(x) for var, net in self.networks.items()}
         # outputs_concat = torch.cat([output for output in outputs.values()], dim=1)
         return outputs
@@ -51,6 +53,10 @@ class FVMNetwork(torch.nn.Module):
         layers = [torch.nn.Linear(input_shape, self.hidden_size), self.activation()]
         for _ in range(self.hidden_layers):
             layers.extend([torch.nn.Linear(self.hidden_size, self.hidden_size), self.activation()])
+            layers.append(torch.nn.BatchNorm1d(self.hidden_size))
+            if self.dropout is not None:
+                layers.append(self.dropout)
+
         layers.append(torch.nn.Linear(self.hidden_size, output_shape))
         return torch.nn.Sequential(*layers)
 # class ConvPhiNet(torch.nn.Module):
