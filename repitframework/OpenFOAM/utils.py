@@ -177,7 +177,7 @@ class OpenfoamUtils:
             save_path = Path(str(solver_dir).replace("Solvers", "Assets"))
             save_path.mkdir(parents=True, exist_ok=True)
         
-        variables = variables if variables else openfoam_config.extend_variables()
+        variables = variables if variables else openfoam_config.get_variables()
         write_interval = write_interval if write_interval else openfoam_config.write_interval
         round_to = openfoam_config.round_to
         time_list: List[int|float] = OpenfoamUtils.generate_intervals(start_time, end_time, write_interval, round_to)

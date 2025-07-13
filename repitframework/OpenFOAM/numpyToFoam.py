@@ -1,36 +1,46 @@
 from pathlib import Path
 import subprocess
 import re
-import os
 from copy import deepcopy
-import json
 
 import numpy as np
 import torch
 import Ofpp
 
-from repitframework.config import OpenfoamConfig, TrainingConfig
+from repitframework.config import OpenfoamConfig
 from repitframework.OpenFOAM import OpenfoamUtils
 
 torch.set_default_dtype(torch.float64)
-'''
-To calculate rho: 
-rho = P*W / R*T
-	P: latest CFD time kg/ms2
-	W: 28.96 gm/mol | 0.02896 kg/mol
-	R: 8.31446261815324 J/mol.K
-	T: Predicted field K
 
-OR: 
-rho = rho_0 - alpha*rho_0(T-T_0): https://www.simscale.com/docs/simwiki/cfd-computational-fluid-dynamics/what-is-boussinesq-approximation/
-'''
+# Default Values: 
+MOL_WT = 0.02896  # kg/mol
+GAS_CONSTANT = 8.31446261815324  # J/(mol*K)
+GRAVITY = 9.81  # m/s^2
+ALPHA = 0.00343  # Thermal expansion coefficient for air at 20 degrees Celsius in 1/K
 
-def calculate_rho(pressure_data:np.ndarray, temperature_data: np.ndarray) -> np.ndarray:
-	mol_wt = 0.02896
-	gas_constant = 8.31446261815324
+
+
+def calculate_rho(
+		pressure_data:np.ndarray, 
+		temperature_data: np.ndarray,
+		mol_wt:float=MOL_WT,
+		gas_constant:float=GAS_CONSTANT
+	) -> np.ndarray:
+	'''
+	To calculate rho: 
+	rho = P*W / R*T
+		P: latest CFD time kg/ms2
+		W: 28.96 gm/mol | 0.02896 kg/mol
+		R: 8.31446261815324 J/mol.K
+		T: Predicted field K
+
+	OR: 
+	rho = rho_0 - alpha*rho_0(T-T_0): 
+		https://www.simscale.com/docs/simwiki/cfd-computational-fluid-dynamics/what-is-boussinesq-approximation/
+	'''
 	temperature_data = temperature_data.reshape(-1)
-
 	rho_idealgas = (pressure_data * mol_wt) / (gas_constant * temperature_data)
+
 	return rho_idealgas
 	
 
@@ -59,11 +69,11 @@ def calculate_prgh(pressure_data:np.ndarray, temperature_data:np.ndarray) -> np.
 	spatial_range = np.array(spatial_range).reshape(-1,)
 	height = np.tile(spatial_range, (200,1))
 	
-	pressure_data = pressure_data.reshape(200,200, order='F')
-	temperature_data = temperature_data.reshape(200,200, order='F')
+	pressure_data = pressure_data.reshape(200,200)
+	temperature_data = temperature_data.reshape(200,200)
 
 	p_rgh = pressure_data - ((mol_wt * gravity)/(gas_constant * temp_avg))* (pressure_data * height)
-	return p_rgh.reshape(-1, order='F')
+	return p_rgh.reshape(-1)
 
 def include_all_features_NC(temperature_data:np.ndarray, 
 							latestML_time_dir:Path, 
@@ -116,7 +126,7 @@ def include_all_features_NC(temperature_data:np.ndarray,
 
 def format_number(x):
 	"""Format a number to 17 significant digits without scientific notation."""
-	return f"{x:.12g}"  # Uses 12 significant figures, trims trailing zeros
+	return f"{x:.17g}"  # Uses 12 significant figures, trims trailing zeros
 
 def parse_numpy(data: np.ndarray) -> str:
     """
@@ -278,8 +288,8 @@ def numpyToFoam(openfoam_config:OpenfoamConfig,
 	If we have a numpy file U_3.npy, we can write it to the OpenFOAM file U at time t=3.
 	"""
 	solver_dir = Path(solver_dir) if solver_dir else openfoam_config.solver_dir
-	assets_path = Path(assets_path) if assets_path else openfoam_config.assets_path
-	variables = variables if variables else openfoam_config.extend_variables()
+	assets_path = Path(assets_path) if assets_path else openfoam_config.assets_dir
+	variables = variables if variables else openfoam_config.get_variables()
 
 	if not latestCFD_time: 
 		latestCFD_time = OpenfoamUtils.max_time_directory(solver_dir, round_to=openfoam_config.round_to)

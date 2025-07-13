@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 from torch import Tensor
 import json
-from .fvmn import FVMNDataset
+from ..fvmn import FVMNDataset
 
 @pytest.fixture
 def dummy_dataset_dir(tmp_path):
