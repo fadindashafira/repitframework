@@ -1,12 +1,18 @@
-from typing import Tuple, Dict
+from typing import Tuple, Dict, Union
 import torch
+import numpy as np
 from pathlib import Path
-from model_selector import OptimizerSelector
 from contextlib import ContextDecorator
 from datetime import datetime
 
-from config import TrainingConfig
-# from repitframework.Dataset import 
+from .model_selector import OptimizerSelector
+from .config import TrainingConfig, NaturalConvectionConfig
+from .Dataset import (
+	hard_constraint_bc, 
+	add_feature, 
+	parse_numpy, 
+	match_input_dim, 
+	calculate_residual)
 
 def load_from_state_dict(
 		model: torch.nn.Module,
@@ -29,7 +35,7 @@ def load_from_state_dict(
 			param_group['lr'] = learning_rate
 	if 'scheduler_state_dict' in checkpoint and scheduler is not None:
 		scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
-	print(f"Model loaded from: {model_save_path/model_name} with LR: {learning_rate}")
+	print(f"\nModel loaded from: {model_save_path/model_name} with LR: {learning_rate}")
 	return model, optimizer, scheduler
 
 def save_to_state_dict(
@@ -99,12 +105,8 @@ class Timer(ContextDecorator):
     def __exit__(self, *exc):
         self.end = datetime.now()
         self.elapsed = self.end - self.start
+	
 
-
-class PredictionInput:
-	def __init__(self, training_config: TrainingConfig,
-			  time):
-		pass
 
 if __name__ == "__main__":
 	from repitframework.config import TrainingConfig

@@ -4,8 +4,8 @@ import inspect
 
 import torch
 
-from Models.FVMN import FVMNetwork
-from Models.NeuralOperator import FVFNO2D
+from .Models.FVMN import FVMNetwork
+from .Models.NeuralOperator import FVFNO2D
 
 
 class ModelSelector:

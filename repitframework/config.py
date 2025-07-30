@@ -184,7 +184,7 @@ class TrainingConfig(BaseConfig):
 		"hidden_layers": 3,
 		"hidden_size": 398,
 		"dropout": 0.2})
-	layers_to_freeze: int = 2 # Number of layers to freeze in the model.
+	layers_to_freeze: int = 1 # Number of layers to freeze in the model.
 
 	log_file: Path = Path("Training.log")
 

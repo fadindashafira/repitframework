@@ -1,8 +1,9 @@
 import numpy as np
 from typing import List, Union, Optional, Tuple
 from pathlib import Path
+from ..Metrics.ResidualNaturalConvection import residual_mass
 
-def hard_contraint_bc(
+def hard_constraint_bc(
     data_list: np.ndarray,
     extended_vars_list: List[str],
     left_wall_temperature: float = 307.75,
@@ -107,6 +108,24 @@ def parse_numpy(
     """
     Loads a .npy file and reshapes as scalar or vector, tailored for 2D/3D.
     Returns parsed numpy array.
+
+    Args
+    ----
+    dataset_file: Union[str, Path]
+        Path to the dataset file.
+    grid_x: int
+        Number of grid points in the x direction.
+    grid_y: int
+        Number of grid points in the y direction.
+    grid_z: int
+        Number of grid points in the z direction. Default is 1.
+    data_dim: int
+        Dimension of the data. Default is 2.
+
+    Returns
+    -------
+    np.ndarray
+        Parsed numpy array reshaped according to grid dimensions.
     """
     data = np.load(dataset_file)
     expected_len = grid_x * grid_y * grid_z
@@ -155,16 +174,22 @@ def normalize(
         mean = np.mean(data, axis=select_dims, keepdims=True)
     if std is None:
         std = np.std(data, axis=select_dims, keepdims=True)
-    normalized_data = (data - mean) / (std + 1e-12)
+    normalized_data = (data - mean) / (std + np.full_like(std, 1e-18))
     return normalized_data, mean, std
-
 
 def match_input_dim(
     output_dims:str, inputs: List[np.ndarray]
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> np.ndarray:
     """
     Reshapes (and stacks) inputs/labels based on output_dims.
     last input is the last time step input, used for prediction.
+
+    Args
+    ----
+    output_dims: str
+        The shape you want to get the data. Example: "BD", "BCD", "BCHW"
+    inputs: List[np.ndarray]
+        List of input numpy arrays at specific time step with shape [num_features, grid_y, grid_x].
     """
     match output_dims:
         case "BD":
@@ -176,3 +201,32 @@ def match_input_dim(
         case _:
             inputs = np.stack(inputs, axis=0)
     return inputs
+
+
+def calculate_residual(dataset_dir: Path,
+                       time: Union[int, float],
+                       grid_x: int, 
+                       grid_y: int, 
+                       grid_z: int=1,
+                       dims:int=2) -> float:
+    '''
+    The switching point between Ml-CFD is residual mass, hence this functionality
+    must not be neglected.
+
+    Note:
+    ----
+    The framework expects the velocity data to be in the form of a 2D numpy array
+    with shape (grid_y, grid_x, 2) where the last dimension contains the
+    x and y components of the velocity.
+    '''
+    data_path = dataset_dir / f"U_{time}.npy"
+    vel_data = parse_numpy(
+        data_path,
+        grid_x=grid_x,
+        grid_y=grid_y,
+        grid_z=grid_z,
+        data_dim=dims
+    )
+    ux_matrix = vel_data[:,:,0]
+    uy_matrix = vel_data[:,:,1]
+    return residual_mass(ux_matrix, uy_matrix, order="C")

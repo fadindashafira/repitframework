@@ -7,7 +7,12 @@ from torch.utils.data import Dataset, DataLoader
 from torch import Tensor
 
 from ..Metrics.ResidualNaturalConvection import residual_mass
-from .utils import normalize, parse_numpy
+from .utils import (
+	normalize, 
+	parse_numpy, 
+	match_input_dim, 
+	calculate_residual
+	)
 
 class BaseDataset(Dataset):
 	"""
@@ -101,7 +106,7 @@ class BaseDataset(Dataset):
 			)
 
 		# Load data for indexing
-		self.inputs, self.labels, self.prediction_input = self._inputs_labels()
+		self.inputs, self.labels = self._inputs_labels()
 
 	def _is_data_present(self) -> bool:
 		"""
@@ -132,6 +137,18 @@ class BaseDataset(Dataset):
 		"""
 		Loads and stacks variables for a given time step.
 		Returns [var, grid_y, grid_x] or stacked shape.
+
+		Args:
+			time: Time step to load data for.
+
+		Returns:
+			np.ndarray: Stacked data for all variables at the given time. [var, grid_y, grid_x]
+
+		Functionality:
+		1. Load numpy files for each variable at the specified time.
+		2. Parse the numpy data according to grid dimensions.
+		3. If data has multiple dimensions, separate them accordingly.
+		4. Return the stacked data as a numpy array.
 		"""
 		full_data_paths = [
 			self.dataset_dir / f"{var}_{time}.npy" for var in self.vars_list
@@ -165,57 +182,6 @@ class BaseDataset(Dataset):
 		data_t_next = self._prepare_input(next_time)
 		return data_t_next - data_t
 
-	def _match_input_label_shape(
-		self, inputs: List[np.ndarray], labels: List[np.ndarray]
-	) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-		"""
-		Reshapes (and stacks) inputs/labels based on output_dims.
-		last input is the last time step input, used for prediction.
-		"""
-		match self.output_dims:
-			case "BD":
-				inputs = [inp.reshape(inp.shape[0], -1).T for inp in inputs]
-				labels = [lab.reshape(lab.shape[0], -1).T for lab in labels]
-				last_input = inputs[-1]
-				inputs = np.concatenate(inputs, axis=0)
-				labels = np.concatenate(labels, axis=0)
-			case "BCD":
-				inputs = [inp.reshape(inp.shape[0], -1) for inp in inputs]
-				labels = [lab.reshape(lab.shape[0], -1) for lab in labels]
-				last_input = inputs[-1]
-				last_input = np.expand_dims(last_input, axis=0)
-				inputs = np.stack(inputs, axis=0)
-				labels = np.stack(labels, axis=0)
-			case _:
-				inputs = np.stack(inputs, axis=0)
-				labels = np.stack(labels, axis=0)
-				last_input = inputs[-1]
-				last_input = np.expand_dims(last_input, axis=0)
-		return inputs, labels, last_input
-
-	def _calculate_residual(self, time) -> float:
-		'''
-		The switching point between Ml-CFD is residual mass, hence this functionality
-		must not be neglected.
-
-		Note:
-		----
-		The framework expects the velocity data to be in the form of a 2D numpy array
-		with shape (grid_y, grid_x, 2) where the last dimension contains the
-		x and y components of the velocity.
-		'''
-		data_path = self.dataset_dir / f"U_{time}.npy"
-		vel_data = parse_numpy(
-			data_path,
-			grid_x=self.grid_x,
-			grid_y=self.grid_y,
-			grid_z=self.grid_z,
-			data_dim=self.dims
-		)
-		ux_matrix = vel_data[:,:,0]
-		uy_matrix = vel_data[:,:,1]
-		return residual_mass(ux_matrix, uy_matrix, order="C")
-
 	def _normalization_routine(
 		self,
 		metrics_save_path: Union[str, Path],
@@ -232,10 +198,10 @@ class BaseDataset(Dataset):
 				raise FileNotFoundError(f"Normalization metrics file missing: {metrics_save_path}")
 			with open(metrics_save_path, "r") as f:
 				metrics = json.load(f)
-			input_mean = np.array(metrics["input_MEAN"])
-			input_std = np.array(metrics["input_STD"])
-			label_mean = np.array(metrics["label_MEAN"])
-			label_std = np.array(metrics["label_STD"])
+			input_mean = np.array(metrics["input_mean"])
+			input_std = np.array(metrics["input_std"])
+			label_mean = np.array(metrics["label_mean"])
+			label_std = np.array(metrics["label_std"])
 
 			norm_inputs, _, _ = normalize(
 				inputs, mean=input_mean, std=input_std, select_dims=self.SELECT_DIMS[self.output_dims]
@@ -258,7 +224,14 @@ class BaseDataset(Dataset):
 					"input_std": input_std.tolist(),
 					"label_mean": label_mean.tolist(),
 					"label_std": label_std.tolist(),
-					"true_residual_mass": self._calculate_residual(self.end_time)
+					"true_residual_mass": calculate_residual(
+						self.dataset_dir,
+						self.end_time,
+						self.grid_x,
+						self.grid_y,
+						self.grid_z,
+						self.dims
+					)
 				},
 				f,
 				indent=4,
@@ -276,22 +249,29 @@ class BaseDataset(Dataset):
 			inputs.append(self._prepare_input(time))
 			labels.append(self._prepare_label(time))
 
-		inputs, labels, prediction_input = self._match_input_label_shape(inputs, labels)
+		inputs = match_input_dim(self.output_dims, inputs)
+		labels = match_input_dim(self.output_dims, labels)
 		metrics_save_path = self.dataset_dir / "norm_denorm_metrics.json"
 		if self.first_training and self.do_normalize:
 			normed_inputs, normed_labels = self._normalization_routine(metrics_save_path, inputs, labels, "w")
-			return normed_inputs,normed_labels, prediction_input
+			return normed_inputs,normed_labels
 		elif self.do_normalize:
 			normed_inputs, normed_labels = self._normalization_routine(metrics_save_path, inputs, labels, "r")
-			return normed_inputs, normed_labels, prediction_input
+			return normed_inputs, normed_labels
 		else:
 			# true residual mass is needed to determine the switching point, hence it must be saved.
 			with open(metrics_save_path, "w") as f:
 				json.dump({
-					"true_residual_mass": self._calculate_residual(self.end_time)
+					"true_residual_mass": calculate_residual(
+						self.dataset_dir,
+						self.end_time,
+						self.grid_x,
+						self.grid_y,
+						self.grid_z,
+						self.dims
+					)
 				})
-			return Tensor(inputs), Tensor(labels), prediction_input
-
+			return Tensor(inputs), Tensor(labels)
 	def __len__(self) -> int:
 		return self.inputs.shape[0]
 

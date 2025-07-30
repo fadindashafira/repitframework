@@ -2,7 +2,7 @@ from typing import List
 import numpy as np
 
 from .baseline import BaseDataset
-from .utils import hard_contraint_bc, add_feature
+from .utils import hard_constraint_bc, add_feature
 
 
 class FVMNDataset(BaseDataset):
@@ -60,15 +60,7 @@ class FVMNDataset(BaseDataset):
 		self.do_feature_selection = do_feature_selection
 
 		super().__init__(*args, **kwargs)
-		self.inputs, self.labels, self.prediction_input = self._inputs_labels()
-		if self.do_feature_selection:
-			'''
-			Because of feature selection, we are extending the labels including the neighboring cells.
-			But we want the model to predict the central cells, from which we can again do the feature selection for
-			prediction. Until now, for [BD, BCD, BCHW]-> D,C,C contain these features, so hard coded it.
-			'''
-			self.labels = self.labels[:,::5] 
-			
+		self.inputs, self.labels = self._inputs_labels()
 
 	def _prepare_input(self, time) -> np.ndarray:
 		'''
@@ -98,7 +90,7 @@ class FVMNDataset(BaseDataset):
 		if not self.do_feature_selection:
 			return temp
 		
-		temp = hard_contraint_bc(
+		temp = hard_constraint_bc(
 					temp,
 					self.extended_vars_list,
 					self.left_wall_temperature,
@@ -106,6 +98,27 @@ class FVMNDataset(BaseDataset):
 				) if self.bc_type == "enforced" else temp
 		data = [add_feature(data) for data in temp]  
 		return np.concatenate(data, axis=0) # Always concatenate (already stacked in add_feature) in axis=0: ["BD", "BCD", "BCHW"]
+	
+	def _prepare_label(self, time: float) -> np.ndarray:
+		"""
+		Returns difference between input at t+dt and t for all variables.
+		Args
+		----
+		time: float
+			- The time at which the input is prepared.
+
+		Note:
+		-----
+		Because of feature selection, we are extending the labels including the neighboring cells.
+		But we want the model to predict the central cells, from which we can again do the feature selection for
+		prediction. Until now, for [BD, BCD, BCHW]-> D,C,C contain these features, so hard coded it.
+		"""
+		data_t = self._prepare_input(time)
+		next_time = round(time + self.time_step, self.round_to)
+		data_t_next = self._prepare_input(next_time)
+		if self.do_feature_selection:
+			return data_t_next[::5] - data_t[::5] # Because prepare input always adds features in dimension 0.
+		return data_t_next - data_t
 	
 	
 
@@ -132,4 +145,3 @@ if __name__ == "__main__":
 		do_normalize=True
 	)
 	print(dataset)
-	print(dataset.prediction_input.shape)
