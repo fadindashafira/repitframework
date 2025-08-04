@@ -3,16 +3,15 @@ from datetime import datetime
 from pathlib import Path
 import logging
 import json
-from collections import defaultdict
-from typing import List
+from typing import List, Literal
 
 
 import torch.cuda as cuda
 import torch
-import numpy as np
 
 @dataclass
 class BaseConfig:
+
 	# Directories:
 	root_dir:Path = Path(__file__).parent.resolve()
 	dataloader_dir:Path = Path(root_dir, "DataLoader")
@@ -21,14 +20,11 @@ class BaseConfig:
 	model_selector_dir:Path = Path(root_dir, "Models")
 	openfoam_dir:Path = Path(root_dir, "OpenFOAM")
 	solver_dir:Path = Path(root_dir, "Solvers","natural_convection_case1")
+
 	plots_dir:Path = Path(root_dir, "plots")
-
-	assets_dir:Path = Path(root_dir, "Assets")
-	assets_path:Path = Path.joinpath(assets_dir, solver_dir.name)
-	assets_path.mkdir(parents=True, exist_ok=True)
-
-	model_dir:Path = Path(root_dir, f"ModelDump/{solver_dir.name}")
-	model_dir.mkdir(parents=True, exist_ok=True)
+	assets_root_dir:Path = Path(root_dir, "Assets")
+	assets_dir:Path = Path.joinpath(assets_root_dir, solver_dir.name)
+	model_dump_dir:Path = Path(root_dir, f"ModelDump/{solver_dir.name}")
 
 	# Logging Level
 	logger_level = logging.DEBUG
@@ -43,23 +39,17 @@ class BaseConfig:
 	write_interval: int|float = 0.01 # Time step size
 	round_to: int = len(str(write_interval).split(".")[-1]) # Number of decimal places to round to
 
-	def get_variables(self, vars_dict:dict=None):
+	def extend_variables(self):
 		"""
 		Because we have a dictionary that separates variables into scalars and vectors,
 		we need to combine them into a single list. We need to further differentiate vectors 
 		based on the number of dimensions (1D or 2D or 3D).
-
-		Args
-		----
-		vars_dict: dict: 
-			The dictionary containing the variables separated into vectors and scalars.
 
 		Returns
 		-------
 		list: 
 			The list of variables: ["U_x", "U_y", "T"]
 		"""
-		self.data_vars = self.data_vars if vars_dict is None else vars_dict
 		vars_list = []
 		for key, value in self.data_vars.items():
 			if key == "vectors":
@@ -76,7 +66,7 @@ class BaseConfig:
 				raise ValueError(f"Invalid key {key} in vars_dict. Must be either 'vectors' or 'scalars'.")
 		return vars_list
 	
-	def extend_variables(self, vars_dict:dict=None):
+	def get_variables(self, vars_dict:dict=None):
 		'''
 		There are cases where we don't exactly need dimension separated variables, 
 		just the variables themselves just like how they are represented in OpenFOAM. 
@@ -135,60 +125,71 @@ class BaseConfig:
 	def __post_init__(self):
 		log_file: Path = Path("BaseConfig.log")
 		self.logger = self.setup_logger("BaseLogger",log_file)
+		
+		for dir in [
+			self.dataloader_dir, 
+			self.logs_dir, 
+			self.metrics_dir, 
+			self.model_selector_dir, 
+			self.openfoam_dir, 
+			self.solver_dir, 
+			self.assets_root_dir, 
+			self.assets_dir, 
+			self.model_dump_dir,
+			self.plots_dir,
+		]:
+			dir.mkdir(parents=True, exist_ok=True)
 
+@dataclass
 class OpenfoamConfig(BaseConfig):
-	def __init__(self):
-		super(OpenfoamConfig, self).__init__()
-		self.case_name:str = None if self.solver_dir is None else self.solver_dir.name
-		self.log_file = Path("OpenFOAM.log")
-		self.mesh_type:str = "blockMesh"
-		self.solver_type:str = "buoyantFoam"
-		self.logger = self.setup_logger("OpenFOAMLogger",self.log_file)
-		self.start_time = 10.0
-		self.end_time = 10.02
+	log_file = Path("OpenFOAM.log")
+	mesh_type:str = "blockMesh"
+	solver_type:str = "buoyantFoam"
+	start_time = 10.0
+	end_time = 10.02
+
+	def __post_init__(self):
+		self.case_name = self.solver_dir.name
 		self.start_time = round(self.start_time, self.round_to)
 		self.end_time = round(self.end_time, self.round_to)
+		self.logger = self.setup_logger("OpenFOAMLogger",self.log_file)
 
+@dataclass
 class TrainingConfig(BaseConfig):
-	def __init__(self):
-		super().__init__()
-		self.batch_size: int = 10000
-		self.epochs: int = 5000
-		self.learning_rate: float = 1e-3
-		self.residual_threshold: float = 5.0 # Adapted from the paper: Section 4.1; page 8
-		self.device: str = "cuda:1" if cuda.is_available() else "cpu"
-		self.optimizer = torch.optim.Adam
-		self.loss = torch.nn.MSELoss()
-		self.activation = torch.nn.ReLU
-		self.weight_decay: float = 1e-5
+	batch_size: int = 10000
+	epochs: int = 5000
+	learning_rate: float = 1e-3
+	residual_threshold: float = 5.0 # Adapted from the paper: Section 4.1; page 8
+	device: str = "cuda:1" if cuda.is_available() else "cpu"
+	loss = torch.nn.MSELoss()
+	activation = torch.nn.ReLU
 
-		self.training_start_time = 10.0
-		self.training_end_time = 10.03
-		self.prediction_start_time = 10.03
-		self.prediction_end_time = 110.0
-		self.bc_type:str = "enforced" # either "enforced" or "ground_truth"
+	training_start_time = 10.0
+	training_end_time = 10.03
+	prediction_start_time = 10.03
+	prediction_end_time = 20.0
+	bc_type:str = "enforced" # either "enforced" or "ground_truth"
 
-		self.log_file: Path = Path("Training.log")
-		self.logger = self.setup_logger("TrainingLogger",self.log_file)
-		self._assign_temperature_profiles()
+	# Dataset parameters:
+	do_feature_selection: bool = True
+	do_normalize: bool = True
+	output_dims: Literal["BD", "BCD", "BCHW"] = "BD"
+
+	# Model parameters: To understand them better, Go to: ./model_selector.py
+	model_type: str = "fvmn" # or "fvfno2d"
+	optimizer_type:str = "adam"
+	scheduler_type:str = None # If None, no scheduler will be used.
+	model_kwargs: dict = field(default_factory=lambda: {
+		"hidden_layers": 3,
+		"hidden_size": 398,
+		"dropout": 0.2})
+	layers_to_freeze: int = 1 # Number of layers to freeze in the model.
+
+	log_file: Path = Path("Training.log")
+
 
 	def log_metrics(self, key:str, value:int|float, metrics_type:str="prediction"):
-		# logging_path = Path(self.model_dir, f"{metrics_type}_metrics.json")
-
-		# data = defaultdict(list)
-		# if logging_path.exists():
-		# 	try:
-		# 		with open(logging_path, "r") as f:
-		# 			data.update(json.load(f))
-		# 	except json.JSONDecodeError:
-		# 		pass
-
-		# data[key].append(value)	
-		
-		# with open(logging_path, "w") as f:
-		# 	json.dump(data, f, indent=4)
-		# use .ndjson extension to signal newline-delimited JSON
-		logging_path = Path(self.model_dir) / f"{metrics_type}_metrics.ndjson"
+		logging_path = Path(self.model_dump_dir) / f"{metrics_type}_metrics.ndjson"
 		logging_path.parent.mkdir(parents=True, exist_ok=True)
 		
 		# build a single JSON record for this metric
@@ -198,6 +199,33 @@ class TrainingConfig(BaseConfig):
 		with open(logging_path, "a") as f:
 			f.write(json.dumps(record) + "\n")
 	
+	def __post_init__(self):
+		self.logger = self.setup_logger("TrainingLogger",self.log_file)
+		variables = self.extend_variables()
+		new_kwargs = {
+			"vars_list": variables,
+			"activation": self.activation,
+			"input_shape": len(variables)*5 if self.do_feature_selection else len(variables)}
+		self.model_kwargs.update(new_kwargs)
+
+		self.optim_kwargs = {
+        "lr": self.learning_rate, 
+        "betas": (0.9, 0.999), 
+        "eps": 1e-8, 
+        "weight_decay": 1e-5, 
+        "amsgrad": False,
+        "momentum": 0.0,
+        "nesterov": False,
+        "alpha": 0.99, 
+        "centered": False,
+        "dampening": 0.0,
+        "initial_accumulator_value": 0.0
+
+    }
+
+@dataclass
+class NaturalConvectionConfig(TrainingConfig):
+
 	def _assign_temperature_profiles(self,):
 		# TODO: for ease of use, it is hard-coded but think about making it dynamic.
 		if self.solver_dir.name == "natural_convection_case1":
@@ -211,77 +239,13 @@ class TrainingConfig(BaseConfig):
 			self.right_wall_temperature = 268.15
 		else:
 			raise ValueError(f"Unknown case name: {self.solver_dir.name}. Please check the case name.")
-		
-	def hard_contraint_bc(
-		self, 
-		data_list:List
-	):
-		'''
-		We are just encoding the boundary conditions as an extra layer to the predicted values. 
-		Also, while preparing the training data, we need to ensure that the boundary conditions are 
-		imposed the same way.
-		
-		Args
-		----
-		ux_matrix: torch.Tensor
-			shape: (grid_y, grid_x)
-		uy_matrix: torch.Tensor
-			shape: (grid_y, grid_x)
-		t_matrix: torch.Tensor
-			shape: (grid_y, grid_x)
-
-		ux and uy are noSlip conditions, hence they should be zero.
-		'''
-		
-		vars_list = self.get_variables()
-		ux_matrix = data_list[vars_list.index("U_x")]
-		uy_matrix = data_list[vars_list.index("U_y")]
-		t_matrix = data_list[vars_list.index("T")]
-
-		ux_matrix = np.pad(ux_matrix, ((1,1),(1,1)), mode="constant", constant_values=0)
-		uy_matrix = np.pad(uy_matrix, ((1,1),(1,1)), mode="constant", constant_values=0)
-		t_matrix = np.pad(t_matrix, ((1,1),(1,1)), mode="constant", constant_values=0)
-
-		'''
-		Applying the boundary conditions:
-		While reshaping the data, we are using order="F" to try to keep the data in the same order as OpenFOAM.
-		But the numpy puts lower wall at the top and upper wall at the bottom. Hence, we need to flip.
-		Naturally: 
-			- Right wall is the cold wall
-			- Left wall is the hot wall
-
-		Numpy:
-			- Top wall is the hot wall
-			- Bottom wall is the cold wall
-
-		But if order="C":
-			- Left wall is the hot wall
-			- Right wall is the cold wall
-		'''
-
-		# Because the problem domain is rotated 90 degrees; left goes to top and right goes to bottom.
-		top_wall_temperature = self.left_wall_temperature
-		bottom_wall_temperature = self.right_wall_temperature
-
-		t_matrix[:, 0] = t_matrix[:, 1]
-		t_matrix[:, -1] = t_matrix[:, -2]
-		t_matrix[0, :] = top_wall_temperature
-		t_matrix[-1, :] = bottom_wall_temperature
-
-		data_list[vars_list.index("U_x")] = ux_matrix
-		data_list[vars_list.index("U_y")] = uy_matrix
-		data_list[vars_list.index("T")] = t_matrix
-
-		return data_list
+	
+	def __post_init__(self):
+		super().__post_init__()
+		self._assign_temperature_profiles()
+		self.logger = self.setup_logger("NaturalConvectionLogger", self.log_file)
 
 if __name__ == "__main__":
-	openfoam_config = OpenfoamConfig()
-	base_config = BaseConfig()
-	training_config = TrainingConfig()
-
-	# Testing logger:
-	base_config.logger.info("Testing BaseConfig logger")
+	training_config = NaturalConvectionConfig()
 	print(training_config.left_wall_temperature, training_config.right_wall_temperature)
-	openfoam_config.logger.info("Testing OpenFOAM logger")
-
-	print(openfoam_config.data_vars, openfoam_config.extend_variables(),openfoam_config.assets_path)
+	print(training_config.model_kwargs)

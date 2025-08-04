@@ -32,7 +32,7 @@ def cleanAssets(assets_dir:str)->None:
     # os.system(f"cp -r {assets_dir}/natural_convection_backup {assets_dir}/natural_convection")
     print("Cleaned the assets directory.")
 
-def cleanMetrics(metrics_dir:str)->None:
+def cleanMetrics(metrics_dir:str, model_name:str)->None:
     """
     Cleans the metrics directory by removing unnecessary files.
     
@@ -41,18 +41,22 @@ def cleanMetrics(metrics_dir:str)->None:
     metrics_dir: Path
         The path to the metrics directory.
     """
-    files_to_clean = ["prediction_metrics.json", "training_metrics.json","best_model.pth", "prediction_metrics.ndjson", "training_metrics.ndjson"]
+    files_to_clean = ["prediction_metrics.json", "training_metrics.json",f"best_model_{model_name}.pth", "prediction_metrics.ndjson", "training_metrics.ndjson"]
     for file in os.scandir(metrics_dir):
         if file.name in files_to_clean:
             os.system(f"rm {file.path}")
-    os.system(f"cp {metrics_dir}/init_model.pth {metrics_dir}/best_model.pth")
+    
+    os.system(f"cp {metrics_dir}/init_model_{model_name}.pth {metrics_dir}/best_model_{model_name}.pth")
+    # os.system(f"cp {metrics_dir}/init_model.pth {metrics_dir}/best_model.pth")
     print("Cleaned the metrics directory.")
 
 if __name__ == "__main__":
+    from repitframework.config import NaturalConvectionConfig
     base_config = BaseConfig()
+    training_config = NaturalConvectionConfig()
     solver_dir = sys.argv[1] if len(sys.argv) > 1 else str(base_config.solver_dir)
     assets_dir = solver_dir.replace("Solvers", "Assets")
     metrics_dir = solver_dir.replace("Solvers", "ModelDump")
     foamRemoveTimes(solver_dir)
     cleanAssets(assets_dir)
-    cleanMetrics(metrics_dir)
+    cleanMetrics(metrics_dir, training_config.model_type)

@@ -1,6 +1,5 @@
 from torch.utils.data import DataLoader, Subset, Dataset
 from typing import Tuple
-from sklearn.model_selection import train_test_split
 
 def train_val_split(
 		dataset: Dataset, 

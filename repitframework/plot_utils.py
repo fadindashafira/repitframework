@@ -10,7 +10,7 @@ import imageio
 from typing import Dict, List
 from datetime import datetime
 
-from repitframework.config import TrainingConfig
+from config import TrainingConfig, NaturalConvectionConfig
 
 sns.set_theme(
 	context="talk",                # Large, readable fonts for presentations/papers
@@ -152,6 +152,47 @@ def visualize_output(
 	else:
 		plt.close()
 		raise ValueError("Invalid mode. Must be either 'image' or 'rgb_array'.")
+
+def make_animation( training_config:TrainingConfig,
+					timestamps:list[int|float],
+					is_ground_truth:bool,
+					save_dir:Path=None,
+					np_data_dir:Path=None, 
+					data_vars:list=None, 
+					save_name:Path=None,
+					plot_pred_gaps:bool=False,
+					set_fps:int=1,
+					round_to:int=2)->bool:
+	'''
+	This function is used to make an animation of the output of the simulation.
+	'''
+	save_path = save_dir / f"{save_name}.gif" if save_name else save_dir / "output.gif"
+
+	images_list = []
+	pred_time_list = [] if is_ground_truth else timestamps
+	if plot_pred_gaps:
+		min_time = min(timestamps)
+		max_time = max(timestamps)
+		interval_time = round(timestamps[1] - timestamps[0], round_to)
+		timestamps = np.round(np.arange(min_time, max_time, interval_time), round_to)
+		
+	for timestamp in timestamps:
+		if timestamp in pred_time_list:
+			images_list.append(visualize_output(training_config=training_config,
+												timestamp=timestamp,
+												np_data_dir=np_data_dir,
+												data_vars=data_vars,
+												mode="rgb_array",
+												is_ground_truth=False))
+		else:
+			images_list.append(visualize_output(training_config=training_config,
+												timestamp=timestamp,
+												np_data_dir=np_data_dir,
+												data_vars=data_vars,
+												mode="rgb_array",
+												is_ground_truth=True))
+	imageio.mimsave(save_path, images_list, fps=set_fps, loop=0)
+	return True
 
 def extend_timesteps_to_full(pred_time_list: List[int | float],time_step: int | float = 0.01) -> List[int | float]:
 	min_time = min(pred_time_list)
@@ -383,16 +424,16 @@ def still_comparisons(
 def save_loss(training_config:TrainingConfig,
 			  save_initial_losses:bool=False,
 			  merge_initial_losses:bool=False):
-	training_metrics_path = training_config.model_dir / "training_metrics.ndjson"
+	training_metrics_path = training_config.model_dump_dir / "training_metrics.ndjson"
 	metrics = load_metrics(training_metrics_path)
 	
-	plots_dir = str(training_config.model_dir).replace("ModelDump", "plots")
+	plots_dir = str(training_config.model_dump_dir).replace("ModelDump", "plots")
 	plots_dir = Path(plots_dir) / "loss"
 	plots_dir.mkdir(parents=True, exist_ok=True)
 	train_loss:list = metrics["Training Loss"]
 	val_loss:list = metrics["Validation Loss"]
 	
-	initial_loss_path = training_config.model_dir / "initial_losses.json"
+	initial_loss_path = training_config.model_dump_dir / "initial_losses.json"
 
 	if save_initial_losses:
 		initial_epochs = val_loss.index(min(val_loss)) + 1
@@ -799,17 +840,18 @@ def plot_everything(
 		relative_residual=metrics["Relative Residual Mass"],
 		residual_limit=residual_limit,
 		save_name="relative_residual",
-		save_path=plots_dir
+		save_path=plots_dir,
+		bins=1e10
 	)
 
 	# --- Streamlines (latest time) ---
-	plot_streamlines_comparison(
-		data_path_1=prediction_dir,
-		data_path_2=None,
-		ground_truth_path=ground_truth_dir,
-		t=plot_end_time,
-		save_path=plots_dir
-	)
+	# plot_streamlines_comparison(
+	# 	data_path_1=prediction_dir,
+	# 	data_path_2=None,
+	# 	ground_truth_path=ground_truth_dir,
+	# 	t=plot_end_time,
+	# 	save_path=plots_dir
+	# )
 
 	# --- Spectral analysis (latest time) ---
 	plot_spectral_analysis(
@@ -858,14 +900,14 @@ def transfer_to_required_directory(dir_name:str,
 			print(f"File {file} does not exist, skipping.")
 
 if __name__ == "__main__":
-	training_config = TrainingConfig()
-	metrics_path = training_config.model_dir
-	ground_truth_path = Path(str(training_config.assets_path)+"_backup")
-	prediction_dir = training_config.assets_path
+	training_config = NaturalConvectionConfig()
+	metrics_path = training_config.model_dump_dir
+	ground_truth_path = Path(str(training_config.assets_dir)+"_backup")
+	prediction_dir = training_config.assets_dir
 	plots_dir = training_config.plots_dir / training_config.solver_dir.name
 	plot_everything(
 		plot_start_time=10.0, 
-		plot_end_time=110.0, 
+		plot_end_time=20.0, 
 		residual_limit=training_config.residual_threshold,
 		training_config=training_config,
 		metrics_dir=metrics_path,
@@ -873,4 +915,4 @@ if __name__ == "__main__":
 		prediction_dir=prediction_dir,
 		plots_dir=plots_dir
 		)
-	transfer_to_required_directory("10epochs100res", "case3", 10000)
+	# transfer_to_required_directory("10epochs100res", "case3", 10000)

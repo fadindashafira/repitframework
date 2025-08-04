@@ -125,7 +125,7 @@ class FNO2d(nn.Module):
         x = self.projection_layer(x)     # [B, out_channels, H, W]
         return x
     
-class FVMNetwork(nn.Module):
+class FVFNO2D(nn.Module):
     def __init__(self,
                 in_channels: int = 15,
                 out_channels: int = 1,

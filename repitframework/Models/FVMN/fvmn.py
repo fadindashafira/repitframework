@@ -1,14 +1,15 @@
 import torch
-from repitframework.config import TrainingConfig
 
 class FVMNetwork(torch.nn.Module):
-    def __init__(self, training_config:TrainingConfig, vars_list:list=None,
-                 hidden_layers:int=3, hidden_size:int=398, activation:torch.nn.ReLU=None, dropout=0.2):
+    def __init__(self, vars_list:list=["U_x", "U_y", "T"],
+                 hidden_layers:int=3, 
+                 hidden_size:int=398, 
+                 activation:torch.nn.ReLU=torch.nn.ReLU, 
+                 dropout=0.2,
+                 input_shape:int=15):
         '''
         Args
         ---- 
-        training_config: TrainingConfig:
-            configuration classes are set to give minimum arguments during initialization.
         vars_list: list
             list containing the variables to be predicted. If None, it will be taken from the training_config.
             e.g: ["U_x", "U_y", "T"]
@@ -20,11 +21,11 @@ class FVMNetwork(torch.nn.Module):
             activation function to be used in the hidden
         '''
         super().__init__()
-        self.num_dims = training_config.data_dim
-        self.vars = training_config.get_variables() if vars_list is None else vars_list
+        self.vars = vars_list
         self.hidden_layers = hidden_layers
         self.hidden_size = hidden_size
-        self.activation = activation if activation is not None else training_config.activation
+        self.input_shape = input_shape
+        self.activation = activation 
         self.dropout_rate = dropout # Store the rate, not the module directly
         
         # Create networks dynamically based on vars_list
@@ -48,7 +49,7 @@ class FVMNetwork(torch.nn.Module):
         """
         Build a single sub-network architecture.
         """
-        input_shape = 15
+        input_shape = self.input_shape
         output_shape = 1
         
         layers = []
@@ -72,11 +73,3 @@ class FVMNetwork(torch.nn.Module):
         layers.append(torch.nn.Linear(self.hidden_size, output_shape))
         
         return torch.nn.Sequential(*layers)
-
-if __name__ == "__main__":
-    # Test the network
-    model = FVMNetwork(TrainingConfig())
-    
-    dummy_input = torch.randn(10,15)
-    output = model(dummy_input)
-    print(output["T"].shape)

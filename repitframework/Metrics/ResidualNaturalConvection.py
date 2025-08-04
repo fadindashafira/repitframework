@@ -1,5 +1,6 @@
 import numpy as np
-from repitframework.config import OpenfoamConfig
+
+from ..config import OpenfoamConfig
 
 foam_config = OpenfoamConfig()
 ny = foam_config.grid_y
@@ -7,7 +8,9 @@ nx = foam_config.grid_x
 grid_step = foam_config.grid_step
 time_step = foam_config.write_interval
 
-def residual_mass(ux_matrix:np.ndarray,uy_matrix:np.ndarray):
+def residual_mass(ux_matrix:np.ndarray,
+                  uy_matrix:np.ndarray,
+                  order:str="C")-> float:
     '''
     Compute the residual: mass conservation
     Formula: 
@@ -20,17 +23,31 @@ def residual_mass(ux_matrix:np.ndarray,uy_matrix:np.ndarray):
     Return:
     Rs_mass_sum: float: sum of Rs_mass
     '''
-    assert ux_matrix.shape == (ny,nx), f"Shape is {ux_matrix.shape} but should be (ny,nx)"
+    # assert ux_matrix.shape == (ny,nx), f"Shape is {ux_matrix.shape} but should be (ny,nx)"
     assert ux_matrix.shape == uy_matrix.shape, "Shape of ux_matrix and uy_matrix should be the same"
 
-    ux_with_down_boundary = ux_matrix[2:ny,1:nx-1]
-    ux_with_up_boundary = ux_matrix[0:ny-2,1:nx-1]
-    uy_with_right_boundary = uy_matrix[1:ny-1,2:nx]
-    uy_with_left_boundary = uy_matrix[1:ny-1,0:nx-2]
+    if order == "F":
+        ux_with_down_boundary = ux_matrix[2:ny,1:nx-1]
+        ux_with_up_boundary = ux_matrix[0:ny-2,1:nx-1]
+        uy_with_right_boundary = uy_matrix[1:ny-1,2:nx]
+        uy_with_left_boundary = uy_matrix[1:ny-1,0:nx-2]
 
-    pinn_dudx = (ux_with_down_boundary - ux_with_up_boundary)/(2*grid_step)
-    pinn_dvdy = (uy_with_right_boundary - uy_with_left_boundary)/(2*grid_step)
+        pinn_dudx = (ux_with_down_boundary - ux_with_up_boundary)/(2*grid_step)
+        pinn_dvdy = (uy_with_right_boundary - uy_with_left_boundary)/(2*grid_step)
 
+    elif order == "C":
+        ux_with_right_boundary = ux_matrix[1:ny-1,2:nx]
+        ux_with_left_boundary = ux_matrix[1:ny-1,0:nx-2]
+        uy_with_top_boundary = uy_matrix[0:ny-2,1:nx-1]
+        uy_with_down_boundary = uy_matrix[2:ny,1:nx-1]
+
+        pinn_dudx = (ux_with_right_boundary - ux_with_left_boundary)/(2*grid_step)
+        pinn_dvdy = (uy_with_down_boundary - uy_with_top_boundary)/(2*grid_step)
+
+    else:
+        raise ValueError("Order should be either 'C' or 'F'")
+
+    
     Rs_mass = pinn_dudx+pinn_dvdy
     Rs_mass_sq = Rs_mass*Rs_mass
     Rs_mass_sum = Rs_mass_sq.sum()/(ny*nx)
