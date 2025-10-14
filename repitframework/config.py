@@ -176,7 +176,7 @@ class TrainingConfig(BaseConfig):
 	output_dims: Literal["BD", "BCD", "BCHW"] = "BD"
 
 	# Model parameters: To understand them better, Go to: ./model_selector.py
-	model_type: str = "fvfno1d" # or "fvfno2d"
+	model_type: str = "fvmn" # or "fvfno2d"
 	optimizer_type:str = "adam"
 	scheduler_type:str = None # If None, no scheduler will be used.
 	model_kwargs: dict = field(default_factory=lambda: {

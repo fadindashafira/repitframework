@@ -133,17 +133,16 @@ class BaseHybridTrainer:
 			loss.backward()
 			self.optimizer.step()
 
-		return loss.item()
+		return loss.item()*inputs.size(0)  # Return total loss for the batch
 
 		
 	def process_one_epoch(self, dataloader:DataLoader) -> float:
 		loss = 0.0
-		num_batches = len(dataloader)
 
 		for batch in dataloader:
 			inputs, labels = batch
 			loss += self.process_one_batch(inputs, labels)
-		loss /= num_batches
+		loss /= len(dataloader.dataset)  # Average loss over all samples
 
 		return loss
 
