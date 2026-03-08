@@ -8,7 +8,7 @@ setup(
     description="Automation framework for ML-CFD cross-computation.",
     long_description=open("README.md").read(),  # Can read from README
     long_description_content_type="text/markdown",  # Specify format
-    url="https://github.com/JBNU-NINE/repitframework",  # Project URL
+    url="https://github.com/POSTECH/repitframework",  # Project URL
     packages=find_packages(),  # Automatically find packages in the directory
     install_requires=[
         "numpy",   # List of dependencies

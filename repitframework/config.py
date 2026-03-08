@@ -147,6 +147,7 @@ class OpenfoamConfig(BaseConfig):
 	solver_type:str = "buoyantFoam"
 	start_time = 10.0
 	end_time = 10.02
+	num_processors: int = 2 # Number of processors for parallel execution. If 1, it will run in serial.
 
 	def __post_init__(self):
 		self.case_name = self.solver_dir.name
