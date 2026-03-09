@@ -4,6 +4,7 @@ repitframework/logs/
 repitframework/ModelDump/
 repitframework/plots/*
 *.pyc
+*.png
 .vscode/
 **/__pycache__
 repitframework.egg-info/
@@ -14,3 +15,5 @@ repitframework.egg-info/
 /random/*
 !/random/*.ipynb
 !/random/*.py
+/order_of_accuracy/*
+build/
