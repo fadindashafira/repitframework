@@ -449,7 +449,7 @@ This project is released under the [MIT License](LICENSE.md).
 ## Contact
 
 - **Author**: Shilaj Baral — shilaj@postech.ac.kr
-- **Lab**: NINELAB, Jeonbuk National University (POSTECH)
+- **Lab**: NINELAB, Pohang University of Science and Technology (POSTECH)
 - **Issues / PRs**: [github.com/POSTECH-NINE/repitframework](https://github.com/POSTECH-NINE/repitframework)
 
 Contributions, bug reports, and feature requests are welcome — please see [CONTRIBUTING.md](CONTRIBUTING.md).
