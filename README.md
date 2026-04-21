@@ -4,14 +4,14 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE.md)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![arXiv](https://img.shields.io/badge/arXiv-2510.21804-b31b1b.svg)](https://arxiv.org/abs/2510.21804)
+[![Journal](https://img.shields.io/badge/CNF-2026.107075-b31b1b.svg)](https://arxiv.org/abs/2510.21804)
 
 This repository is the official implementation of the **XRePIT** method introduced in:
 
-> **Residual-guided AI-CFD hybrid method enables stable and scalable simulations: from 2D benchmarks to 3D applications**  
+> **XRePIT: A deep learning–computational fluid dynamics hybrid framework implemented in OpenFOAM for fast, robust, and scalable unsteady simulations**  
 > Shilaj Baral, Youngkyu Lee, Sangam Khanal, Joongoo Jeon  
-> *arXiv preprint* arXiv:2510.21804, 2025  
-> [[Paper]](https://arxiv.org/abs/2510.21804)
+> *Computers & Fluids*  
+> [[Paper]](https://doi.org/10.1016/j.compfluid.2026.107075)
 
 XRePIT alternates between an OpenFOAM CFD solver and a data-driven neural network (FVMN or FNO), using physics residuals to decide when to switch. It achieves **up to 4.98× wall-clock speedup** over CFD-alone while keeping thermal field errors around 10⁻³ and velocity errors below 10⁻² m s⁻¹, over 10,000+ timesteps in both 2D and 3D natural convection problems.
 
@@ -77,13 +77,13 @@ The **scaled continuity residual** (mass residual relative to an OpenFOAM refere
 
 ## Key Results
 
-| Case | Dimension | Model | Speedup (ψ) | ΔT error |
-|------|-----------|-------|-------------|----------|
-| Case A | 2D | FVMN | 2.05× | ~10⁻³ K |
-| Case A | 2D | FVFNO | 1.44× | ~10⁻³ K |
-| Case A | 3D | FVMN | **3.00×** | ~10⁻³ K |
-| Case B | 2D | FVMN | 2.24× | ~10⁻³ K |
-| Case C | 2D | FVMN | 2.17× | ~10⁻³ K |
+| Case | Dimension | Model | Speedup (ψ) 
+|------|-----------|-------|-------------
+| Case A | 2D | FVMN | 2.05× |
+| Case A | 2D | FVFNO | 1.44× |
+| Case A | 3D | FVMN | **3.00×** |
+| Case B | 2D | FVMN | 2.24× |
+| Case C | 2D | FVMN | 2.17× |
 
 ---
 
@@ -97,7 +97,7 @@ repitframework/
 │   ├── trainer.py             # BaseHybridTrainer (training loop + checkpointing)
 │   ├── predictor.py           # BaseHybridPredictor (autoregressive rollout)
 │   ├── model_selector.py      # Factory for models, optimizers, schedulers
-│   ├── plot_utils.py          # All visualization utilities (incl. plot_everything)
+│   ├── plot_utils.py          # Visualization utilities
 │   ├── utils.py               # Timer, state dict helpers
 │   ├── foamResetFramework.py  # Reset OpenFOAM case to initial state
 │   ├── DataLoader/
@@ -415,13 +415,13 @@ The test suite covers dataset utilities, OpenFOAM parsing helpers, and model com
 If you use this code or the XRePIT method in your research, please cite:
 
 ```bibtex
-@article{baral2025xrepit,
-  title   = {Residual-guided {AI}-{CFD} hybrid method enables stable and scalable simulations:
-             from {2D} benchmarks to {3D} applications},
-  author  = {Baral, Shilaj and Lee, Youngkyu and Khanal, Sangam and Jeon, Joongoo},
-  journal = {arXiv preprint arXiv:2510.21804},
-  year    = {2025},
-  url     = {https://arxiv.org/abs/2510.21804}
+@article{baral2026xrepit,
+  title={XRePIT: A deep learning--computational fluid dynamics hybrid framework implemented in OpenFOAM for fast, robust, and scalable unsteady simulations},
+  author={Baral, Shilaj and Lee, Youngkyu and Khanal, Sangam and Jeon, Joongoo},
+  journal={Computers \& Fluids},
+  pages={107075},
+  year={2026},
+  publisher={Elsevier}
 }
 ```
 
